@@ -154,7 +154,7 @@ class SourcePawnPlugin(object):
         return c_char_p(self.base[self.stringbase + stroffset:]).value
 
     def extract_from_buffer(self, fp):
-        hdr = self.sp_file_hdr(buf=fp.read(sizeof(self.sp_file_hdr)))
+        hdr = self.sp_file_hdr(fp.read(sizeof(self.sp_file_hdr)))
 
         if hdr.magic != SPFILE_MAGIC:
             raise SourcePawnPluginFormatError(

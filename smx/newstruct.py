@@ -122,19 +122,16 @@ class StructBase(type(ctypes.Structure)):
 class Struct(ctypes.Structure):
     __metaclass__ = StructBase
 
-    def __init__(self, base=None, offset=None, size=None, buf=None):
+    def __init__(self, base=None, offset=None, size=None):
         ctypes.Structure.__init__(self)
 
-        _buf = None
-        if buf is not None:
-            _buf = buf
-        elif base is not None:
-            if size is None:
-                size = ctypes.sizeof(self)
-            _buf = buffer(base, offset, size)
-
-        if _buf is not None:
-            self.pack_into(_buf)
+        args = []
+        if offset is not None:
+            args.append(offset)
+            if size is not None:
+                args.append(size)
+        if base is not None:
+            self.pack_into(buffer(base, *args))
 
     def pack_into(self, buffer):
         fit = min(len(buffer), ctypes.sizeof(self))
