@@ -1,7 +1,7 @@
 PySMX
 =====
 
-PySMX is a Python module for reading information from compiled SourcePawn plug-ins. At the moment, the most useful thing PySMX does is read the strings from the myinfo variable.
+PySMX is a Python module for reading information from compiled SourcePawn plug-ins. At the moment, the most useful thing PySMX does is read the strings from the myinfo variable. However, technically, PySMX is a full SMX reader, extracting and reading all sections.
 
 Usage
 -----
