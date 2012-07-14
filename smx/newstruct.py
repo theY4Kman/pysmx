@@ -122,6 +122,8 @@ class StructBase(type(ctypes.Structure)):
 class Struct(ctypes.Structure):
     __metaclass__ = StructBase
 
+    _fields_ = []
+
     def __init__(self, base=None, offset=None, size=None):
         ctypes.Structure.__init__(self)
 
