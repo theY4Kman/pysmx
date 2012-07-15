@@ -1,16 +1,19 @@
 PySMX
 =====
 
-PySMX is a Python module for reading information from compiled SourcePawn plug-ins. At the moment, the most useful thing PySMX does is read the strings from the myinfo variable. However, technically, PySMX is a full SMX reader, extracting and reading all sections.
+PySMX is a Python module for reading and executing compiled SourcePawn plug-ins. Its aim is to enable unit testing of plug-ins, improving code quality and enabling test-driven development in SourceMod.
+
+At the moment, only a small subset of opcodes and one native (format-string-only PrintToServer) are implemented, allowing for the execution of the test plug-in at test/test.smx.
 
 Usage
 -----
 
-As the myinfo struct is most important at this stage, here's the canonical example for how to extract it from a plug-in:
+Here's how to load and execute a plug-in:
 
 ```python
 import smx
 with open('myplugin.smx', 'rb') as fp:
     plugin = smx.SourcePawnPlugin(fp)
-    print plugin.myinfo
+    print 'Loaded %s...' % plugin
+    plugin.run()
 ```
