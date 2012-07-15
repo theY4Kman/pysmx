@@ -1,4 +1,14 @@
 # SourcePawn defines
+from ctypes import c_uint32
+
+
+class SourcePawnPluginError(Exception):
+    pass
+class SourcePawnPluginFormatError(SourcePawnPluginError):
+    pass
+class SourcePawnPluginNativeError(SourcePawnPluginError):
+    pass
+
 
 SPFILE_MAGIC = 0x53504646
 
@@ -25,3 +35,5 @@ SP_NTVFLAG_OPTIONAL = (1<<0) # Native is optional
 SP_DBG_SCOPE_GLOBAL = 0
 SP_DBG_SCOPE_LOCAL  = 1
 SP_DBG_SCOPE_STATIC = 2
+
+cell = c_uint32

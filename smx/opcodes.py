@@ -192,6 +192,9 @@ class SPOpcodes(object):
             self._op_to_name[opcode] = name
             self._name_to_op[name] = opcode
 
+    def __getitem__(self, item):
+        return self._op_to_name[item]
+
     def __getattr__(self, item):
         try:
             return self._name_to_op[item]

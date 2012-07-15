@@ -74,7 +74,7 @@ PyCSimpleType = type(ctypes.c_byte)
 class StructField(object):
     creation_counter = 0
 
-    def __init__(self, ctyp=None):
+    def __init__(self, ctyp=None, width=None):
         if ctyp is not None and not hasattr(self, 'ctyp'):
             if type(ctyp) == StructField:
                 self.ctyp = ctyp.ctyp
@@ -85,6 +85,8 @@ class StructField(object):
 
         elif not hasattr(self, 'ctyp'):
             raise ValueError('ctyp must be passed to a vanilla StructField')
+
+        self.width = width
 
         self.creation_counter = StructField.creation_counter
         StructField.creation_counter += 1
@@ -144,6 +146,9 @@ class NoAlignStruct(Struct):
     _pack_ = 1
 
 
+def ctyp_field_init(self, width=None):
+    StructField.__init__(self, width=width)
+
 glb = globals()
 ctyp_found = []
 for name,field_name in zip(__ctypes__, __cftypes__):
@@ -151,7 +156,7 @@ for name,field_name in zip(__ctypes__, __cftypes__):
         continue
     ctyp = getattr(ctypes, name)
     field_ctyp = type('_%s_StructField' % name,
-        (StructField,), { 'ctyp': ctyp })
+        (StructField,), { 'ctyp': ctyp, '__init__': ctyp_field_init })
     glb[field_name] = field_ctyp
     ctyp_found.append(field_name)
 

@@ -2,15 +2,8 @@ import zlib
 from ctypes import *
 from newstruct import *
 
+from . import smxexec
 from .smxdefs import *
-
-
-class SourcePawnPluginError(Exception):
-    pass
-class SourcePawnPluginFormatError(SourcePawnPluginError):
-    pass
-class SourcePawnPluginNativeError(SourcePawnPluginError):
-    pass
 
 
 def _extract_strings(buffer, num_strings=1):
@@ -333,12 +326,16 @@ class SourcePawnPlugin(object):
         self.stringtab = None
 
         self.data = None
+        self.datasize = None
+        self.memsize = None
         self.pcode = None
 
         self.tags = None
         self.publics = None
         self.pubvars = None
         self.natives = None
+
+        self.runtime = None
 
         if buffer is not None:
             self.extract_from_buffer(filelike)
@@ -351,6 +348,11 @@ class SourcePawnPlugin(object):
         if self.filled:
             return 'Nameless SourcePawn Plug-in'
         return 'Empty SourcePawn Plug-in'
+
+    def run(self):
+        if self.runtime is None:
+            self.runtime = smxexec.SourcePawnPluginRuntime(self)
+        self.runtime.run()
 
     def _get_flags(self):
         if not hasattr(self, 'pcode') or self.pcode is None:
@@ -452,6 +454,8 @@ class SourcePawnPlugin(object):
             sect = sections['.data']
             dat = self.sp_file_data(self.base, sect.dataoffs)
             self.data = sect.dataoffs + dat.data
+            self.datasize = dat.datasize
+            self.memsize = dat.memsize
         else:
             raise SourcePawnPluginFormatError('.data section not found!')
 
@@ -473,7 +477,7 @@ class SourcePawnPlugin(object):
         if '.publics' in sections:
             sect = sections['.publics']
 
-            self.publics = []
+            self.publics = {}
             _publicsize = sizeof(self.sp_file_publics)
             self.num_publics = sect.size / _publicsize
 
@@ -483,9 +487,10 @@ class SourcePawnPlugin(object):
                     buffer(self.base, sect.dataoffs, sect.size)[:], sect.size)
 
             for i,pub in enumerate(publics):
-                code_offs = self.data + pub.address
+                code_offs = pub.address
                 funcid = (i << 1) | 1
-                self.publics.append(self._public(code_offs, funcid, pub.name))
+                _pub = self._public(code_offs, funcid, pub.name)
+                self.publics[_pub.name] = _pub
 
         # Variables defined as public, most importantly myinfo
         if '.pubvars' in sections:
@@ -511,7 +516,7 @@ class SourcePawnPlugin(object):
         if '.natives' in sections:
             sect = sections['.natives']
 
-            self.natives = []
+            self.natives = {}
             self.num_natives = sect.size / sizeof(self.sp_file_natives)
 
             # Make our Struct array for easy access
@@ -522,7 +527,7 @@ class SourcePawnPlugin(object):
             for native in natives:
                 native = self._native(0, _invalid_native,
                                       SP_NATIVE_UNBOUND, None, native.name)
-                self.natives.append(native)
+                self.natives[native.name] = native
 
         if '.dbg.strings' in sections:
             self.debug.stringbase = sections['.dbg.strings'].dataoffs
