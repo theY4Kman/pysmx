@@ -5,7 +5,7 @@ CODE 0	; 0
 
 
 DATA 2	; 0
-dump 2e342e31 65642d35 76 312f3730 30322f38 3231 313a3831 35313a35 0 5 0 c 18 
+dump 2e342e31 65642d35 76 312f3730 30322f38 3231 303a3132 31333a31 0 5 0 c 18 
 dump 0 0 0
 dump 0
 dump 65726f43 0 65726f63 0 44 4c 0 0 
@@ -63,6 +63,36 @@ CODE 0	; 88
 	break	; 8c
 	; line d
 	break	; 90
+	;$lcl percent fffffffc
+	push.c 64
+	;$exp
+	; line e
+	break	; 9c
+	;$lcl i fffffff8
+	push.c 0
+	;$exp
+	jump 8d
+l.8b		; b0
+	; line e
+	break	; b0
+	inc.s fffffff8
+	;$exp
+l.8d
+	load.s.pri fffffff8
+	const.alt a
+	jsgeq 8c
+	;$exp
+	; line f
+	break	; d4
+	load.s.both fffffff8 fffffffc
+	add
+	stor.s.pri fffffffc
+	;$exp
+	jump 8b
+l.8c		; f8
+	stack 4
+	; line 11
+	break	; 100
 	const.pri cafed00d
 	heap 4
 	stor.i
@@ -73,31 +103,29 @@ CODE 0	; 88
 	stor.i
 	push.alt
 	;$par
-	const.pri 40a9999a ; 5.3
+	const.pri 40a9999a
 	heap 4
 	stor.i
 	push.alt
 	;$par
-	const.pri 64 ; 100
+	push.adr fffffffc
+	;$par
+	const.pri 73
 	heap 4
 	stor.i
 	push.alt
 	;$par
-	const.pri 73 ; 115 's'
-	heap 4
-	stor.i
-	push.alt
-	;$par
-	push2.c 180 12c ; 384 300
+	push2.c 180 12c
 	;$par
 	sysreq.n 2 7
-	heap ffffffec
+	heap fffffff0
 	;$exp
-	; line e
-	break	; 12c
+	; line 12
+	break	; 18c
 	push.c 0
 	call Test
 	;$exp
+	stack 4
 	zero.pri
 	retn
 
@@ -106,12 +134,12 @@ DATA 0	; 12c
 dump 66207325 74636e75 256e6f69 6f772063 25206b72 20252564 2d2f2b28 332e2520 6f202966 68742066 69742065 2021656d 6c206f4e 65676e6f 78302072 2d207825 
 dump 6f6e202d 65772077 20657227 58257830 21 6d726f46 7461 
 
-CODE 0	; 148
+CODE 0	; 1b0
 	proc	; Test
-	; line 12
-	break	; 14c
-	; line 13
-	break	; 150
+	; line 16
+	break	; 1b4
+	; line 17
+	break	; 1b8
 	push.c 188
 	;$par
 	sysreq.n 2 1

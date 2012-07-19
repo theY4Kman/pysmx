@@ -12,6 +12,15 @@ class SourcePawnVerificationError(SourcePawnPluginError):
     pass
 
 
+def list_pop(lst, index=-1, default=None):
+    try:
+        return lst.pop(index)
+    except IndexError:
+        return default
+
+def tohex(val):
+    return '%x' % ucell(val).value
+
 
 class SourcePawnAbstractMachine(object):
     ZERO = cell(0)
@@ -26,12 +35,12 @@ class SourcePawnAbstractMachine(object):
             amx.ALT = amx._getdatacell(offs)
 
         def load_s_pri(self, amx):
-            offs = amx._getparam()
-            amx.PRI = amx._getdatacell(amx.FRM + offs)
+            offs = amx._getparam_p()
+            amx.PRI = amx._getheapcell(amx.FRM + offs)
 
         def load_s_alt(self, amx):
             offs = amx._getparam()
-            amx.ALT = amx._getdatacell(amx.FRM + offs)
+            amx.ALT = amx._getheapcell(amx.FRM + offs)
 
         def proc(self, amx):
             amx._push(amx.FRM)
@@ -67,9 +76,7 @@ class SourcePawnAbstractMachine(object):
             val = amx._getparam()
             amx._push(val)
             amx.PRI = amx._nativecall(offs, amx.STK)
-
-        def push_c(self, amx):
-            amx._push(amx._getparam())
+            amx.STK += val * 4
 
         def ret(self, amx):
             amx.FRM = amx._pop()
@@ -83,6 +90,8 @@ class SourcePawnAbstractMachine(object):
             # TODO: verify return address
             amx.CIP = offs
             amx.STK += amx._getstackcell() + sizeof(cell)
+            # Keep our Python stack list updated
+            amx._filter_stack(amx.STK)
 
         def zero_pri(self, amx):
             amx.PRI = 0
@@ -100,41 +109,82 @@ class SourcePawnAbstractMachine(object):
         def nop(self, amx):
             pass
 
-        def lref_pri(self, amx): raise NotImplementedError
-        def lref_alt(self, amx): raise NotImplementedError
+        def lref_pri(self, amx):
+            offs = amx._getparam()
+            offs = amx._getdatacell(offs)
+            amx.PRI = amx._getdatacell(offs)
+
+        def lref_alt(self, amx):
+            offs = amx._getparam()
+            offs = amx._getdatacell(offs)
+            amx.ALT = amx._getdatacell(offs)
 
         def const_pri(self, amx):
             amx.PRI = amx._getparam()
         def const_alt(self, amx):
             amx.ALT = amx._getparam()
 
-        def addr_pri(self, amx): raise NotImplementedError
-        def addr_alt(self, amx): raise NotImplementedError
+        def addr_pri(self, amx):
+            amx.PRI = amx._getparam()
+            amx.PRI += amx.FRM
+        def addr_alt(self, amx):
+            amx.ALT = amx._getparam()
+            amx.ALT += amx.FRM
 
         def stor_pri(self, amx):
-            offs = amx._getparam_p()
+            offs = amx._getparam()
             amx._writeheap(offs, cell(amx.PRI))
         def stor_alt(self, amx):
-            offs = amx._getparam_p()
+            offs = amx._getparam()
             amx._writeheap(offs, cell(amx.ALT))
 
         def stor_s_pri(self, amx):
             offs = amx._getparam_p()
-            amx._writeheap(amx.FRM + offs, cell(amx.PRI))
+            addr = amx.FRM + offs
+            val = cell(amx.PRI)
+            amx._writeheap(addr, val)
+            # Keep our Python stack list updated
+            amx._stack_set(addr, val)
         def stor_s_alt(self, amx):
             offs = amx._getparam_p()
-            amx._writeheap(amx.FRM + offs, cell(amx.ALT))
+            addr = amx.FRM + offs
+            val = cell(amx.ALT)
+            amx._writeheap(addr, val)
+            # Keep our Python stack list updated
+            amx._stack_set(addr, val)
 
-        def sref_pri(self, amx): raise NotImplementedError
-        def sref_alt(self, amx): raise NotImplementedError
-        def sref_s_pri(self, amx): raise NotImplementedError
-        def sref_s_alt(self, amx): raise NotImplementedError
+        def sref_pri(self, amx):
+            offs = amx._getparam()
+            offs = amx._getdatacell(offs)
+            amx._writeheap(offs, cell(amx.PRI))
+        def sref_alt(self, amx):
+            offs = amx._getparam()
+            offs = amx._getdatacell(offs)
+            amx._writeheap(offs, cell(amx.ALT))
+
+        def sref_s_pri(self, amx):
+            offs = amx._getparam()
+            offs = amx._getdatacell(amx.FRM + offs)
+            amx._writeheap(offs, cell(amx.PRI))
+        def sref_s_alt(self, amx):
+            offs = amx._getparam()
+            offs = amx._getdatacell(amx.FRM + offs)
+            amx._writeheap(offs, cell(amx.ALT))
 
         def stor_i(self, amx):
             # TODO: verify address
             amx._writeheap(amx.ALT, cell(amx.PRI))
 
-        def strb_i(self, amx): raise NotImplementedError
+        def strb_i(self, amx):
+            # TODO: memory checking
+            number = amx._getparam()
+            if number == 1:
+                amx._writeheap(amx.ALT, c_uint8(amx.PRI))
+            elif number == 2:
+                amx._writeheap(amx.ALT, c_uint16(amx.PRI))
+            elif number == 4:
+                amx._writeheap(amx.ALT, c_uint32(amx.PRI))
+
         def lidx(self, amx): raise NotImplementedError
         def lidx_b(self, amx): raise NotImplementedError
         def idxaddr(self, amx): raise NotImplementedError
@@ -152,16 +202,18 @@ class SourcePawnAbstractMachine(object):
         def push_alt(self, amx):
             amx._push(amx.ALT)
 
-        def push_r(self, amx): raise NotImplementedError
-        def push(self, amx): raise NotImplementedError
-        def push_s(self, amx): raise NotImplementedError
-
         def pop_pri(self, amx):
             amx.PRI = amx._pop()
         def pop_alt(self, amx):
             amx.ALT = amx._pop()
 
-        def stack(self, amx): raise NotImplementedError
+        def stack(self, amx):
+            offs = amx._getparam()
+            amx.ALT = amx.STK
+            amx.STK += offs
+            # Keep our Python stack list up to date
+            amx._filter_stack(amx.STK)
+            # TODO: CHKMARGIN CHKHEAP
 
         def heap(self, amx):
             offs = amx._getparam()
@@ -172,11 +224,11 @@ class SourcePawnAbstractMachine(object):
         def call(self, amx):
             amx._push(amx.CIP + sizeof(cell))
             amx.CIP = amx._jumprel(amx.CIP)
-            # Update our ASM verification
-            amx._verify_jump(amx.CIP, is_call=True)
 
         def call_pri(self, amx): raise NotImplementedError
-        def jump(self, amx): raise NotImplementedError
+        def jump(self, amx):
+            amx.CIP = amx._jumprel(amx.CIP)
+
         def jrel(self, amx): raise NotImplementedError
         def jzer(self, amx): raise NotImplementedError
         def jnz(self, amx): raise NotImplementedError
@@ -189,7 +241,12 @@ class SourcePawnAbstractMachine(object):
         def jsless(self, amx): raise NotImplementedError
         def jsleq(self, amx): raise NotImplementedError
         def jsgrtr(self, amx): raise NotImplementedError
-        def jsgeq(self, amx): raise NotImplementedError
+        def jsgeq(self, amx):
+            if amx.PRI >= amx.ALT:
+                amx.CIP = amx._jumprel(amx.CIP)
+            else:
+                amx._skipparam(label=True)
+
         def shl(self, amx): raise NotImplementedError
         def shr(self, amx): raise NotImplementedError
         def sshr(self, amx): raise NotImplementedError
@@ -203,22 +260,48 @@ class SourcePawnAbstractMachine(object):
         def umul(self, amx): raise NotImplementedError
         def udiv(self, amx): raise NotImplementedError
         def udiv_alt(self, amx): raise NotImplementedError
-        def add(self, amx): raise NotImplementedError
-        def sub(self, amx): raise NotImplementedError
+
+
+        # Bitwise operators
+        def dand(self, amx):
+            amx.PRI &= amx.ALT
+        def dor(self, amx):
+            amx.PRI |= amx.ALT
+        def xor(self, amx):
+            amx.PRI ^= amx.ALT
+        def dnot(self, amx):
+            amx.PRI = not amx.PRI
+        def neg(self, amx):
+            amx.PRI = -amx.PRI
+        def invert(self, amx):
+            amx.PRI = ~amx.PRI
+
+
+        # Adding
+        def add(self, amx):
+            amx.PRI += amx.ALT
+        def add_c(self, amx):
+            value = amx._getparam()
+            amx.PRI += value
+
+
+        # Subtracting
+        def sub(self, amx):
+            amx.PRI = amx.ALT - amx.PRI
+
         def sub_alt(self, amx): raise NotImplementedError
-        def dand(self, amx): raise NotImplementedError
-        def dor(self, amx): raise NotImplementedError
-        def xor(self, amx): raise NotImplementedError
-        def dnot(self, amx): raise NotImplementedError
-        def neg(self, amx): raise NotImplementedError
-        def invert(self, amx): raise NotImplementedError
-        def add_c(self, amx): raise NotImplementedError
+
         def smul_c(self, amx): raise NotImplementedError
         def zero_s(self, amx): raise NotImplementedError
         def sign_pri(self, amx): raise NotImplementedError
         def sign_alt(self, amx): raise NotImplementedError
-        def eq(self, amx): raise NotImplementedError
-        def neq(self, amx): raise NotImplementedError
+
+
+        # Comparisons
+        def eq(self, amx):
+            amx.PRI = 1 if amx.PRI == amx.ALT else 0
+        def neq(self, amx):
+            amx.PRI = 1 if amx.PRI != amx.ALT else 0
         def less(self, amx): raise NotImplementedError
         def leq(self, amx): raise NotImplementedError
         def grtr(self, amx): raise NotImplementedError
@@ -229,10 +312,19 @@ class SourcePawnAbstractMachine(object):
         def sgeq(self, amx): raise NotImplementedError
         def eq_c_pri(self, amx): raise NotImplementedError
         def eq_c_alt(self, amx): raise NotImplementedError
+
+
+        # Incrementation
         def inc_pri(self, amx): raise NotImplementedError
         def inc_alt(self, amx): raise NotImplementedError
         def inc(self, amx): raise NotImplementedError
-        def inc_s(self, amx): raise NotImplementedError
+        def inc_s(self, amx):
+            offs = amx._getparam_p()
+            addr = amx.FRM + offs
+            val = cell(amx._getheapcell(addr) + 1)
+            amx._writeheap(addr, val)
+            amx._stack_set(addr, val)
+
         def inc_i(self, amx): raise NotImplementedError
         def dec_pri(self, amx): raise NotImplementedError
         def dec_alt(self, amx): raise NotImplementedError
@@ -259,31 +351,103 @@ class SourcePawnAbstractMachine(object):
         def casetbl(self, amx): raise NotImplementedError
         def swap_pri(self, amx): raise NotImplementedError
         def swap_alt(self, amx): raise NotImplementedError
-        def push_adr(self, amx): raise NotImplementedError
         def symtag(self, amx): raise NotImplementedError
-        def push2_c(self, amx):
-            amx._push(amx._getparam())
-            amx._push(amx._getparam())
 
-        def push2(self, amx): raise NotImplementedError
-        def push2_s(self, amx): raise NotImplementedError
-        def push2_adr(self, amx): raise NotImplementedError
-        def push3_c(self, amx): raise NotImplementedError
-        def push3(self, amx): raise NotImplementedError
-        def push3_s(self, amx): raise NotImplementedError
-        def push3_adr(self, amx): raise NotImplementedError
-        def push4_c(self, amx): raise NotImplementedError
-        def push4(self, amx): raise NotImplementedError
-        def push4_s(self, amx): raise NotImplementedError
-        def push4_adr(self, amx): raise NotImplementedError
-        def push5_c(self, amx): raise NotImplementedError
-        def push5(self, amx): raise NotImplementedError
-        def push5_s(self, amx): raise NotImplementedError
-        def push5_adr(self, amx): raise NotImplementedError
-        def load_both(self, amx): raise NotImplementedError
-        def load_s_both(self, amx): raise NotImplementedError
-        def const_(self, amx): raise NotImplementedError
-        def const_s(self, amx): raise NotImplementedError
+
+        def _macro_push_n(self, amx, n):
+            for x in xrange(n):
+                offs = amx._getparam()
+                val = amx._getheapcell(offs)
+                amx._push(val)
+
+        def push(self, amx):
+            self._macro_push_n(amx, 1)
+        def push2(self, amx):
+            self._macro_push_n(amx, 2)
+        def push3(self, amx):
+            self._macro_push_n(amx, 3)
+        def push4(self, amx):
+            self._macro_push_n(amx, 4)
+        def push5(self, amx):
+            self._macro_push_n(amx, 5)
+
+
+        def _macro_push_n_c(self, amx, n):
+            for x in xrange(n):
+                amx._push(amx._getparam())
+
+        def push_c(self, amx):
+            self._macro_push_n_c(amx, 1)
+        def push2_c(self, amx):
+            self._macro_push_n_c(amx, 2)
+        def push3_c(self, amx):
+            self._macro_push_n_c(amx, 3)
+        def push4_c(self, amx):
+            self._macro_push_n_c(amx, 4)
+        def push5_c(self, amx):
+            self._macro_push_n_c(amx, 5)
+
+
+        def push_r(self, amx): raise NotImplementedError
+
+
+        def _macro_push_n_s(self, amx, n):
+            for x in xrange(n):
+                offs = amx._getparam()
+                val = amx._getheapcell(amx.FRM + offs)
+                amx._push(val)
+
+        def push_s(self, amx):
+            self._macro_push_n_s(amx, 1)
+        def push2_s(self, amx):
+            self._macro_push_n_s(amx, 2)
+        def push3_s(self, amx):
+            self._macro_push_n_s(amx, 3)
+        def push4_s(self, amx):
+            self._macro_push_n_s(amx, 4)
+        def push5_s(self, amx):
+            self._macro_push_n_s(amx, 5)
+
+
+        def _macro_push_n_adr(self, amx, n):
+            for x in xrange(n):
+                offs = amx._getparam()
+                amx._push(amx.FRM + offs)
+
+        def push_adr(self, amx):
+            self._macro_push_n_adr(amx, 1)
+        def push2_adr(self, amx):
+            self._macro_push_n_adr(amx, 2)
+        def push3_adr(self, amx):
+            self._macro_push_n_adr(amx, 3)
+        def push4_adr(self, amx):
+            self._macro_push_n_adr(amx, 4)
+        def push5_adr(self, amx):
+            self._macro_push_n_adr(amx, 5)
+
+
+        def load_both(self, amx):
+            offs = amx._getparam()
+            amx.PRI = amx._getdatacell(offs)
+            offs = amx._getparam()
+            amx.ALT = amx._getdatacell(offs)
+
+        def load_s_both(self, amx):
+            offs = amx._getparam_p()
+            amx.PRI = amx._getheapcell(amx.FRM + offs)
+            offs = amx._getparam_p()
+            amx.ALT = amx._getheapcell(amx.FRM + offs)
+
+        def const_(self, amx):
+            offs = amx._getparam()
+            val = amx._getparam()
+            amx._writeheap(offs, cell(val))
+
+        def const_s(self, amx):
+            offs = amx._getparam()
+            val = amx._getparam()
+            amx._writeheap(amx.FRM + offs, cell(val))
+
         def sysreq_d(self, amx): raise NotImplementedError
         def sysreq_nd(self, amx): raise NotImplementedError
         def tracker_push_c(self, amx): raise NotImplementedError
@@ -345,11 +509,13 @@ class SourcePawnAbstractMachine(object):
         # Instruction verification (match spcomp -a)
         self._verification = None
         self._func_offs = None  # dict(funcname=code_offs)
+        self._label_offs = None  # dict(labeltitle=code_offs)
         self._to_match = None   # The list of instructions to match
         self._executed = None   # The list of instructions executed
         self._processed = None  # A zipped list of the instructions executed
                                 # and expected
 
+        self.instr = None # The current instruction being executed
         self.halted = None # Whether a halt instruction has been executed
 
     def init(self):
@@ -368,6 +534,7 @@ class SourcePawnAbstractMachine(object):
 
         self._stack = []
 
+        self.instr = 0
         self.halted = False
 
         self.initialized = True
@@ -382,7 +549,10 @@ class SourcePawnAbstractMachine(object):
 
     def _jumprel(self, offset):
         """Returns the abs address to jump to"""
-        return self._readcodecell(offset)
+        addr = self._readcodecell(offset)
+        # Update our ASM verification
+        self._verify_jump(addr)
+        return addr
 
     def _getcodecell(self, peek=False):
         cip = self._cip() if not peek else self.CIP
@@ -390,11 +560,11 @@ class SourcePawnAbstractMachine(object):
 
     def _readcodecell(self, address):
         off = address + 4
-        return struct.unpack('<L', self.code[address:off])[0]
+        return struct.unpack('<l', self.code[address:off])[0]
 
     def _getdatacell(self, offset):
         addr = self.plugin.data + offset
-        return struct.unpack('<L', self.plugin.base[addr:addr+sizeof(cell)])[0]
+        return struct.unpack('<l', self.plugin.base[addr:addr+sizeof(cell)])[0]
 
     def _getheapcell(self, offset):
         heap = cast(self.heap, POINTER(cell))
@@ -407,13 +577,13 @@ class SourcePawnAbstractMachine(object):
 
     def _getdatabyte(self, offset):
         addr = self.plugin.data + offset
-        return struct.unpack('<B',
-                             self.plugin.base[addr:addr+sizeof(c_uint8)])[0]
+        return struct.unpack('<b',
+                             self.plugin.base[addr:addr+sizeof(c_int8)])[0]
 
     def _getdatashort(self, offset):
         addr = self.plugin.data + offset
-        return struct.unpack('<H',
-                             self.plugin.base[addr:addr+sizeof(c_uint16)])[0]
+        return struct.unpack('<h',
+                             self.plugin.base[addr:addr+sizeof(c_int16)])[0]
 
     def _local_to_string(self, addr):
         return self.plugin._get_data_string(addr)
@@ -432,13 +602,26 @@ class SourcePawnAbstractMachine(object):
     def _instr(self):
         return self._getcodecell()
 
-    def _getparam(self, peek=False):
+    def _getparam(self, peek=False, label=False):
         param = self._getcodecell(peek)
         if self._verification:
-            self._executed[-1][1].append('%x' % param)
+            self._add_arg(param, label=label)
         return param
-    def _getparam_p(self):
-        return self._getparam() >> (sizeof(cell)*4)
+
+    def _getparam_p(self, label=False):
+        return self._getparam(label=label)
+
+    def _getparam_op(self, label=False):
+        param = self.instr & 0xffff
+        if self._verification:
+            self._add_arg(param, label=label)
+        return param
+
+    def _skipparam(self, n=1, label=False):
+        for x in xrange(n):
+            # We use _getparam to hit our verification code
+            self._getparam(label=label)
+
 
     def _push(self, value):
         """Pushes a cell onto the stack"""
@@ -453,12 +636,32 @@ class SourcePawnAbstractMachine(object):
         self._stack.pop()
         return v
 
+    def _filter_stack(self, new_stk):
+        self._stack = filter(lambda o: o[0] >= new_stk, self._stack)
+
+    def _stack_set(self, set_addr, set_val):
+        """
+        When writing directly to the stack, instead of popping and pushing, we
+        need to manually find and update values.
+        """
+        # TODO: update _stack to use an OrderedDict
+        index = None
+        for i,(addr,val) in enumerate(self._stack):
+            if set_addr == addr:
+                index = i
+                break
+
+        if index is not None:
+            self._stack[index] = (set_addr, set_val)
+
+
     def _write(self, addr, value):
         memmove(addr, pointer(value), sizeof(value))
     def _writestack(self, value):
         self._writeheap(self.STK, value)
     def _writeheap(self, offset, value):
         self._write(addressof(self.heap) + offset, value)
+
 
     def _nativecall(self, index, paramoffs):
         try:
@@ -477,6 +680,7 @@ class SourcePawnAbstractMachine(object):
 
         pyfunc(params)
 
+
     def _verify_asm(self, asm):
         """
         Reads in the output of spcomp -a <source.sp>, and verifies the
@@ -492,6 +696,7 @@ class SourcePawnAbstractMachine(object):
 
         self._verification = { '': list() }
         self._func_offs = { }
+        self._label_offs = { }
         self._to_match = list()
         self._executed = list()
         self._processed = list()
@@ -500,14 +705,18 @@ class SourcePawnAbstractMachine(object):
         lines = list(enumerate(sz_lines, 1))
         lines = filter(lambda l: l[1], lines)
         lines = filter(lambda l: not l[1].startswith(';'), lines)
+
         proc_name = None
+        label_name = None
+
         last_offs = None
+        cur_offs = 0
         for lineno,line in lines:
             # Lines starting with capital letters are sections, ignore them
             if line[0].isupper():
                 if line.startswith('CODE'):
                     offs = line[line.rfind(';')+1:].strip()
-                    last_offs = int(offs, 16)
+                    cur_offs = last_offs = int(offs, 16)
                 continue
 
             spl = line.split(';', 1)
@@ -518,8 +727,16 @@ class SourcePawnAbstractMachine(object):
 
             instr_spl = sz_instr.split(' ')
             args = instr_spl[1:]
+            instr = instr_spl[0]
 
-            instr = instr_spl[0].replace('.', '_')
+            if instr.startswith('l.'):
+                label_name = instr
+                self._label_offs[cur_offs] = label_name
+                if label_name not in self._verification:
+                    self._verification[label_name] = list()
+                continue
+
+            instr = instr.replace('.', '_')
             instr = fixes.get(instr, instr)
             if instr == 'proc':
                 proc_name = comment
@@ -527,28 +744,60 @@ class SourcePawnAbstractMachine(object):
                 if proc_name not in self._verification:
                     self._verification[proc_name] = list()
 
-            elif instr in ('ret', 'retn'):
-                proc_name = None
+            cur_offs += sizeof(cell) * len(instr_spl)
 
             instr_tuple = (instr, args, sz_instr, lineno)
             self._verification[''].append(instr_tuple)
             if proc_name is not None:
                 self._verification[proc_name].append(instr_tuple)
+            if label_name is not None:
+                self._verification[label_name].append(instr_tuple)
 
-    def _verify_jump(self, address, is_call=False):
-        self._processed += zip(self._to_match, self._executed)
-        self._executed = list()
+    def _verify_jump(self, address, no_param=False):
+        old_to_match = self._to_match[:1]
         self._to_match = list()
 
-        funcname = self._get_funcname_by_offs(address)
-        if funcname is not None:
-            self._to_match += self._verification[funcname]
+        codename = self._get_funcname_by_offs(address)
+        if codename is not None:
+            self._to_match = self._verification[codename]
             # The ASM uses labels, so let's fake the label as a param
-            if is_call:
-                self._processed[-1][1][1].append(funcname)
+            if not no_param:
+                self._add_arg(self._asm_alias(codename))
         else:
             print 'Verification fault:'
             print '  Unrecognized jump to 0x%08x' % address
+
+        self._processed += zip(old_to_match, self._executed)
+        self._executed = list()
+
+    def _asm_alias(self, codename):
+        """Takes either a function or label name, and returns the alias used
+        in the ASM file."""
+        if codename.startswith('l.'):
+            return codename[2:]
+
+        try:
+            code_offs = int(codename, 16)
+            alias = self._get_funcname_by_offs(code_offs)
+            if alias is not None:
+                if alias.startswith('l.'):
+                    return alias[2:]
+                return alias
+        except ValueError:
+            pass
+
+        return codename
+
+    def _add_arg(self, arg, offset=-1, label=False):
+        if not isinstance(arg, str):
+            arg = tohex(arg)
+        if label:
+            arg = self._asm_alias(arg)
+
+        if self._executed:
+            self._executed[offset][1].append(arg)
+        elif self._processed:
+            self._processed[offset][1][1].append(arg)
 
     def _get_funcname_by_offs(self, code_offs):
         funcname = None
@@ -556,7 +805,10 @@ class SourcePawnAbstractMachine(object):
             funcname = self.plugin.publics_by_offs[code_offs].name
         elif code_offs in self._func_offs:
             funcname = self._func_offs[code_offs]
+        elif code_offs in self._label_offs:
+            funcname = self._label_offs[code_offs]
         return funcname
+
 
     def _execute(self, code_offs):
         if not self.initialized:
@@ -572,21 +824,31 @@ class SourcePawnAbstractMachine(object):
                 raise SourcePawnVerificationError(
                     'Function %s not found in ASM source' % funcname)
 
-            self._to_match += self._verification[funcname]
-
         self.CIP = code_offs
         while not self.halted and self.CIP < self.plugin.pcode.size:
+            if self._verification:
+                codename = self._get_funcname_by_offs(self.CIP)
+                if codename is not None:
+                    self._to_match = self._verification[codename][:]
+
             c = self._instr()
+            self.instr = c
             op = c & ((1 << sizeof(cell)*4)-1)
 
             if self._verification:
-                self._executed.append((opcodes[op], list(), None))
+                self._executed.append((opcodes[op], list(), None, None))
 
             if hasattr(self.instructions, opcodes[op]):
                 getattr(self.instructions, opcodes[op])(self)
             else:
                 ######################
                 print opcodes[op]
+
+            # Update our processed instructions list
+            if self._verification and self._executed:
+                matched = list_pop(self._to_match, 0, ())
+                executed = self._executed.pop(0)
+                self._processed.append((matched, executed))
 
         if self._verification:
             faults = 0

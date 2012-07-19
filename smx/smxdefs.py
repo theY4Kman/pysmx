@@ -1,5 +1,5 @@
 # SourcePawn defines
-from ctypes import c_uint32
+from ctypes import c_uint32, c_int32
 
 
 class SourcePawnPluginError(Exception):
@@ -36,4 +36,5 @@ SP_DBG_SCOPE_GLOBAL = 0
 SP_DBG_SCOPE_LOCAL  = 1
 SP_DBG_SCOPE_STATIC = 2
 
-cell = c_uint32
+ucell = c_uint32
+cell = c_int32

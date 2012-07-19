@@ -1,3 +1,4 @@
+from functools import wraps
 import re
 from ctypes import *
 from .smxdefs import *
@@ -16,6 +17,12 @@ NULL = 0
 
 class SourcePawnStringFormatError(SourcePawnPluginNativeError):
     pass
+
+def _check_fmt_args(x, arg, args):
+    if (arg + x) > args:
+        raise SourcePawnStringFormatError(
+            'String formatted incorrectly - parameter %d (total %d)' %
+            (arg, args))
 
 
 def has_flag(v, flag):
@@ -69,7 +76,7 @@ def render_float(val, flags, width, precision):
     return render_fmt('f', flags, width, precision) % val
 
 
-def formatfunc(matches, eats=0, inc=True):
+def formatfunc(matches, eats=0, incr=True):
     """
     Marks a function as a format handler
     @type   matches: iterable -> str[1]
@@ -77,15 +84,24 @@ def formatfunc(matches, eats=0, inc=True):
     @type   eats: int
     @param  eats: The number of arguments the format function uses up on
                 successful formatting (returning non-None)
-    @type   inc: bool
-    @param  inc: Whether or not to increment i after return
+    @type   incr: bool
+    @param  incr: Whether or not to increment i after return
     """
     def inner(f):
-        f.formatfunc = True
-        f.matches = matches
-        f.eats = eats
-        f.inc = inc
-        return f
+        func = f
+        if eats > 0:
+            def wrapper(*args, **kwargs):
+                state = kwargs['state'] if 'state' in kwargs else args[-1]
+                _check_fmt_args(eats, state.arg - 1, state.args)
+                return f(*args, **kwargs)
+            func = wraps(f)(wrapper)
+
+        func.formatfunc = True
+        func.matches = matches
+        func.eats = eats
+        func.incr = incr
+
+        return func
     return inner
 
 def isformatfunc(f):
@@ -105,25 +121,32 @@ class PrintfFormatter(object):
     def ladjust(self, ch, state):
         state.flags |= FMT_LADJUST
 
-    @formatfunc('.', inc=False)
+    @formatfunc('.', incr=False)
     def precision(self, ch, state):
         state.i += 1 # Eat the period
         prec,chars = atoi(state.fmt[state.i:], length=True)
         state.precision = None if prec < 0 else prec
         state.i += chars
+        state.sz_format += '.' + str(prec)
 
     @formatfunc('0')
     def zeropad(self, ch, state):
         state.flags |= FMT_ZEROPAD
 
-    @formatfunc('123456789', inc=False)
+    @formatfunc('123456789', incr=False)
     def width(self, ch, state):
         state.width,chars = atoi(state.fmt[state.i:], length=True)
         state.i += chars
+        state.sz_format += str(state.width)
+
+    @formatfunc('%')
+    def percent(self, ch, state):
+        return '%'
 
     @formatfunc('c', eats=1)
     def char(self, ch, state):
-        val = state.amx._local_to_char(state.params[state.arg])
+        addr = state.amx._getheapcell(state.params[state.arg])
+        val = state.amx._local_to_char(addr)
         return val[0]
 
     @formatfunc('id', eats=1)
@@ -178,6 +201,7 @@ class PrintfFormatter(object):
     @formatfunc('xX', eats=1)
     def hexadecimal(self, ch, state):
         val = state.amx._getheapcell(state.params[state.arg])
+        val = ucell(val).value
         h = render_hex(val, state.flags, state.width)
         if ch.isupper():
             h = h.upper()
@@ -185,7 +209,7 @@ class PrintfFormatter(object):
 
 
 
-def atcprintf(_amx, _fmt, _params, _arg, _args, formatter=PrintfFormatter()):
+def atcprintf(_amx, _fmt, _params, _arg, formatter=PrintfFormatter()):
     _len = len(_fmt)
 
     class PrintfState:
@@ -196,7 +220,7 @@ def atcprintf(_amx, _fmt, _params, _arg, _args, formatter=PrintfFormatter()):
         width = 0
         precision = None
         arg = _arg
-        args = _args
+        args = _params[0]
         amx = _amx
         params = _params
         sz_format = None
@@ -219,27 +243,28 @@ def atcprintf(_amx, _fmt, _params, _arg, _args, formatter=PrintfFormatter()):
         state.precision = None
         state.sz_format = '%'
 
+        do_break = False
         while state.i < _len:
             ch = state.fmt[state.i]
-            inc = True
             if ch in formatter.format_chars:
                 f = formatter.format_chars[ch]
-                inc = f.inc
                 out = f(ch, state)
+
                 if out is not None:
                     state.out += str(out)
                     state.arg += f.eats
-                    if inc:
-                        state.i += 1
+                    do_break = True
+
+                if f.incr:
+                    state.sz_format += ch
+                    state.i += 1
+
+                if do_break:
                     break
-                state.sz_format += ch
 
             else:
                 state.out += ch
                 break
-
-            if inc:
-                state.i += 1
 
     return state.out
 
@@ -272,5 +297,5 @@ class SourceModNatives(object):
     @native
     def PrintToServer(self, params):
         fmt = self.amx._local_to_string(params[1])
-        out = atcprintf(self.amx, fmt, params, 2, params[0]-1)
+        out = atcprintf(self.amx, fmt, params, 2)
         self.printf(out)
