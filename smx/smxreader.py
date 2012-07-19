@@ -28,7 +28,7 @@ def extract_stringtable(base, stringbase, size):
     stringtable = {}
     buf = buffer(base, stringbase, size)
     offset = 0
-    while offset < size:
+    while offset <= size:
         s = c_char_p(buf[offset:]).value
         stringtable[offset] = s
         offset += len(s)+1
@@ -332,10 +332,9 @@ class SourcePawnPlugin(object):
 
         self.tags = None
         self.publics = None
+        self.publics_by_offs = None
         self.pubvars = None
         self.natives = None
-
-        self.runtime = None
 
         if buffer is not None:
             self.extract_from_buffer(filelike)
@@ -349,9 +348,16 @@ class SourcePawnPlugin(object):
             return 'Nameless SourcePawn Plug-in'
         return 'Empty SourcePawn Plug-in'
 
+    def _get_runtime(self):
+        if hasattr(self, '_runtime'):
+            return self._runtime
+        self._runtime = smxexec.SourcePawnPluginRuntime(self)
+        return self._runtime
+    def _set_runtime(self, value):
+        self._runtime = value
+    runtime = property(_get_runtime, _set_runtime)
+
     def run(self):
-        if self.runtime is None:
-            self.runtime = smxexec.SourcePawnPluginRuntime(self)
         self.runtime.run()
 
     def _get_flags(self):
@@ -359,17 +365,18 @@ class SourcePawnPlugin(object):
             raise AttributeError('%s instance has no attribute \'flags\'' %
                                  type(self))
         return self.pcode.flags
-
     def _set_flags(self, value):
         if not hasattr(self, 'pcode') or self.pcode is None:
             raise AttributeError('%s instance has no attribute \'flags\'' %
                                  type(self))
         self.pcode.flags = value
-
     flags = property(_get_flags, _set_flags)
 
     def _get_data_string(self, dataoffset):
         return c_char_p(self.base[self.data + dataoffset:]).value
+
+    def _get_data_char(self, dataoffset):
+        return c_char_p(self.base[self.data + dataoffset:]).value[0]
 
     def _get_string(self, stroffset):
         return c_char_p(self.base[self.stringbase + stroffset:]).value
@@ -421,7 +428,7 @@ class SourcePawnPlugin(object):
                 _total_sectsize)
 
         sections = {}
-        for sect in _sections:
+        for sect in _sections[:hdr.sections]:
             name = c_char_p(buffer(self.base,
                                    self.stringtab + sect.nameoffs)[:]).value
             sections[name] = sect
@@ -470,7 +477,7 @@ class SourcePawnPlugin(object):
             memmove(addressof(tags),
                     buffer(self.base, sect.dataoffs, sect.size)[:], sect.size)
 
-            for tag in tags:
+            for tag in tags[:self.num_tags]:
                 self.tags[tag.tag_id] = self._tag(tag.tag_id, tag.name)
 
         # Functions defined as public
@@ -478,6 +485,7 @@ class SourcePawnPlugin(object):
             sect = sections['.publics']
 
             self.publics = {}
+            self.publics_by_offs = {}
             _publicsize = sizeof(self.sp_file_publics)
             self.num_publics = sect.size / _publicsize
 
@@ -486,11 +494,12 @@ class SourcePawnPlugin(object):
             memmove(addressof(publics),
                     buffer(self.base, sect.dataoffs, sect.size)[:], sect.size)
 
-            for i,pub in enumerate(publics):
+            for i,pub in enumerate(publics[:self.num_publics]):
                 code_offs = pub.address
                 funcid = (i << 1) | 1
                 _pub = self._public(code_offs, funcid, pub.name)
                 self.publics[_pub.name] = _pub
+                self.publics_by_offs[code_offs] = _pub
 
         # Variables defined as public, most importantly myinfo
         if '.pubvars' in sections:
@@ -504,7 +513,7 @@ class SourcePawnPlugin(object):
             memmove(addressof(pubvars),
                     buffer(self.base, sect.dataoffs, sect.size)[:], sect.size)
 
-            for pubvar in pubvars:
+            for pubvar in pubvars[:self.num_pubvars]:
                 offs = self.data + pubvar.address
                 pubvar = self._pubvar(offs, pubvar.name)
                 self.pubvars.append(pubvar)
@@ -524,7 +533,7 @@ class SourcePawnPlugin(object):
             memmove(addressof(natives),
                     buffer(self.base, sect.dataoffs, sect.size)[:], sect.size)
 
-            for native in natives:
+            for native in natives[:self.num_natives]:
                 native = self._native(0, _invalid_native,
                                       SP_NATIVE_UNBOUND, None, native.name)
                 self.natives[native.name] = native
@@ -552,7 +561,7 @@ class SourcePawnPlugin(object):
                     buffer(self.base, sect.dataoffs, sect.size)[:], sect.size)
 
             self.debug.files = []
-            for dbg_file in files:
+            for dbg_file in files[:num_dbg_files]:
                 self.debug.files.append(
                     self.debug._file(dbg_file.addr, dbg_file.name)
                 )
@@ -566,7 +575,7 @@ class SourcePawnPlugin(object):
                     buffer(self.base, sect.dataoffs, sect.size)[:], sect.size)
 
             self.debug.lines = []
-            for line in lines:
+            for line in lines[:num_dbg_lines]:
                 self.debug.lines.append(
                     self.debug._line(line.addr, line.line)
                 )
@@ -577,10 +586,11 @@ class SourcePawnPlugin(object):
             num_dbg_symbols = sect.size / sizeof(self.sp_fdbg_symbol)
             symbols = (self.sp_fdbg_symbol * num_dbg_symbols)()
             memmove(addressof(symbols),
-                    buffer(self.base, sect.dataoffs, sect.size)[:], sect.size)
+                    buffer(self.base, sect.dataoffs, sect.size)[:],
+                    sizeof(symbols))
 
             self.debug.symbols = []
-            for sym in symbols:
+            for sym in symbols[:num_dbg_symbols]:
                 self.debug.symbols.append(
                     self.debug._symbol(sym.addr, sym.tagid, sym.codestart,
                                        sym.codeend, sym.ident, sym.vclass,

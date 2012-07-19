@@ -84,10 +84,10 @@ sp_opcodes_list = [
     'add',
     'sub',
     'sub_alt',
-    'and',
-    'or',
+    'dand',
+    'dor',
     'xor',
-    'not',
+    'dnot',
     'neg',
     'invert',
     'add_c',
@@ -194,6 +194,9 @@ class SPOpcodes(object):
 
     def __getitem__(self, item):
         return self._op_to_name[item]
+
+    def get(self, k, d=None):
+        return self._op_to_name.get(k, d)
 
     def __getattr__(self, item):
         try:
