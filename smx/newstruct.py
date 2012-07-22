@@ -64,11 +64,15 @@ __cftypes__ = [
     'cf_wchar',
     'cf_wchar_p'
 ]
-__static_all__ = ['StructField', 'field', 'StructBase', 'Struct', 'NoAlignStruct']
+__static_all__ = ['StructField', 'field', 'StructBase', 'Struct', 'NoAlignStruct', 'cast_value']
 __all__ = __cftypes__ + __static_all__
 
 # We can't import this directly, so grab it from any C type
 PyCSimpleType = type(ctypes.c_byte)
+
+
+def cast_value(ctyp, value):
+    return ctypes.cast(value, ctypes.POINTER(ctyp)).contents.value
 
 
 class StructField(object):

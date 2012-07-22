@@ -5,10 +5,17 @@ from ctypes import *
 import sys
 from .sourcemod import *
 from .smxdefs import *
+from .newstruct import cast_value
 from .opcodes import *
 
 
 class SourcePawnVerificationError(SourcePawnPluginError):
+    pass
+class SourcePawnOpcodeDeprecated(DeprecationWarning):
+    pass
+class SourcePawnOpcodeNotSupported(SourcePawnOpcodeDeprecated):
+    pass
+class SourcePawnOpcodeNotGenerated(SourcePawnOpcodeDeprecated):
     pass
 
 
@@ -26,6 +33,37 @@ class SourcePawnAbstractMachine(object):
     ZERO = cell(0)
 
     class SMXInstructions(object):
+
+        def align_pri(self, amx): raise SourcePawnOpcodeNotGenerated
+        def align_alt(self, amx): raise SourcePawnOpcodeNotGenerated
+        def lctrl(self, amx): raise SourcePawnOpcodeNotGenerated
+        def sctrl(self, amx): raise SourcePawnOpcodeNotGenerated
+        def push_r(self, amx): raise SourcePawnOpcodeDeprecated
+        def ret(self, amx): raise SourcePawnOpcodeNotGenerated
+        def call_pri(self, amx): raise SourcePawnOpcodeNotGenerated
+        def jrel(self, amx): raise SourcePawnOpcodeNotGenerated
+        def jless(self, amx): raise SourcePawnOpcodeNotGenerated
+        def jleq(self, amx): raise SourcePawnOpcodeNotGenerated
+        def jgrtr(self, amx): raise SourcePawnOpcodeNotGenerated
+        def jgeq(self, amx): raise SourcePawnOpcodeNotGenerated
+        def umul(self, amx): raise SourcePawnOpcodeNotGenerated
+        def udiv(self, amx): raise SourcePawnOpcodeNotGenerated
+        def udiv_alt(self, amx): raise SourcePawnOpcodeNotGenerated
+        def less(self, amx): raise SourcePawnOpcodeNotGenerated
+        def leq(self, amx): raise SourcePawnOpcodeNotGenerated
+        def grtr(self, amx): raise SourcePawnOpcodeNotGenerated
+        def geq(self, amx): raise SourcePawnOpcodeNotGenerated
+        def cmps(self, amx): raise SourcePawnOpcodeNotGenerated
+        def sysreq_pri(self, amx): raise SourcePawnOpcodeNotGenerated
+        def file(self, amx): raise SourcePawnOpcodeDeprecated
+        def line(self, amx): raise SourcePawnOpcodeDeprecated
+        def symbol(self, amx): raise SourcePawnOpcodeDeprecated
+        def srange(self, amx): raise SourcePawnOpcodeDeprecated
+        def jump_pri(self, amx): raise SourcePawnOpcodeNotGenerated
+        def symtag(self, amx): raise SourcePawnOpcodeDeprecated
+        def sysreq_d(self, amx): raise SourcePawnOpcodeNotSupported
+        def sysreq_nd(self, amx): raise SourcePawnOpcodeNotSupported
+
         def load_pri(self, amx):
             offs = amx._getparam()
             amx.PRI = amx._getdatacell(offs)
@@ -71,6 +109,7 @@ class SourcePawnAbstractMachine(object):
             elif offs == 4:
                 amx.PRI = amx._getdatacell(amx.PRI)
 
+        # Native calls
         def sysreq_n(self, amx):
             offs = amx._getparam()
             val = amx._getparam()
@@ -78,11 +117,6 @@ class SourcePawnAbstractMachine(object):
             amx.PRI = amx._nativecall(offs, amx.STK)
             amx.STK += val * 4
 
-        def ret(self, amx):
-            amx.FRM = amx._pop()
-            offs = amx._pop()
-            # TODO: verify return address
-            amx.CIP = offs
 
         def retn(self, amx):
             amx.FRM = amx._pop()
@@ -186,13 +220,10 @@ class SourcePawnAbstractMachine(object):
                 amx._writeheap(amx.ALT, c_uint32(amx.PRI))
 
         def lidx(self, amx): raise NotImplementedError
-        def lidx_b(self, amx): raise NotImplementedError
+        def lidx_b(self, amx): raise NotImplementedErrorz
         def idxaddr(self, amx): raise NotImplementedError
         def idxaddr_b(self, amx): raise NotImplementedError
-        def align_pri(self, amx): raise NotImplementedError
-        def align_alt(self, amx): raise NotImplementedError
-        def lctrl(self, amx): raise NotImplementedError
-        def sctrl(self, amx): raise NotImplementedError
+
         def move_pri(self, amx): raise NotImplementedError
         def move_alt(self, amx): raise NotImplementedError
         def xchg(self, amx): raise NotImplementedError
@@ -225,41 +256,120 @@ class SourcePawnAbstractMachine(object):
             amx._push(amx.CIP + sizeof(cell))
             amx.CIP = amx._jumprel(amx.CIP)
 
-        def call_pri(self, amx): raise NotImplementedError
+
+        # Jumps
         def jump(self, amx):
             amx.CIP = amx._jumprel(amx.CIP)
 
-        def jrel(self, amx): raise NotImplementedError
-        def jzer(self, amx): raise NotImplementedError
-        def jnz(self, amx): raise NotImplementedError
-        def jeq(self, amx): raise NotImplementedError
-        def jneq(self, amx): raise NotImplementedError
-        def jless(self, amx): raise NotImplementedError
-        def jleq(self, amx): raise NotImplementedError
-        def jgrtr(self, amx): raise NotImplementedError
-        def jgeq(self, amx): raise NotImplementedError
-        def jsless(self, amx): raise NotImplementedError
-        def jsleq(self, amx): raise NotImplementedError
-        def jsgrtr(self, amx): raise NotImplementedError
+        def jzer(self, amx):
+            if amx.PRI == 0:
+                amx.CIP = amx._jumprel(amx.CIP)
+            else:
+                amx._skipparam(label=True)
+
+        def jnz(self, amx):
+            if amx.PRI != 0:
+                amx.CIP = amx._jumprel(amx.CIP)
+            else:
+                amx._skipparam(label=True)
+
+        def jeq(self, amx):
+            if amx.PRI == amx.ALT:
+                amx.CIP = amx._jumprel(amx.CIP)
+            else:
+                amx._skipparam(label=True)
+
+        def jneq(self, amx):
+            if amx.PRI != amx.ALT:
+                amx.CIP = amx._jumprel(amx.CIP)
+            else:
+                amx._skipparam(label=True)
+
+        def jsless(self, amx):
+            if amx.PRI < amx.ALT:
+                amx.CIP = amx._jumprel(amx.CIP)
+            else:
+                amx._skipparam(label=True)
+
+        def jsleq(self, amx):
+            if amx.PRI <= amx.ALT:
+                amx.CIP = amx._jumprel(amx.CIP)
+            else:
+                amx._skipparam(label=True)
+
+        def jsgrtr(self, amx):
+            if amx.PRI > amx.ALT:
+                amx.CIP = amx._jumprel(amx.CIP)
+            else:
+                amx._skipparam(label=True)
+
         def jsgeq(self, amx):
             if amx.PRI >= amx.ALT:
                 amx.CIP = amx._jumprel(amx.CIP)
             else:
                 amx._skipparam(label=True)
 
-        def shl(self, amx): raise NotImplementedError
-        def shr(self, amx): raise NotImplementedError
-        def sshr(self, amx): raise NotImplementedError
-        def shl_c_pri(self, amx): raise NotImplementedError
-        def shl_c_alt(self, amx): raise NotImplementedError
-        def shr_c_pri(self, amx): raise NotImplementedError
-        def shr_c_alt(self, amx): raise NotImplementedError
-        def smul(self, amx): raise NotImplementedError
-        def sdiv(self, amx): raise NotImplementedError
-        def sdiv_alt(self, amx): raise NotImplementedError
-        def umul(self, amx): raise NotImplementedError
-        def udiv(self, amx): raise NotImplementedError
-        def udiv_alt(self, amx): raise NotImplementedError
+
+        # Shifts
+        def shl(self, amx):
+            amx.PRI <<= amx.ALT
+
+        def shr(self, amx):
+            pri = cast_value(ucell, amx.PRI)
+            amx.PRI = pri >> amx.ALT
+
+        def sshr(self, amx):
+            amx.PRI >>= amx.ALT
+
+        def shl_c_pri(self, amx):
+            offs = amx._getparam()
+            amx.PRI <<= offs
+
+        def shl_c_alt(self, amx):
+            offs = amx._getparam()
+            amx.ALT <<= offs
+
+        def shr_c_pri(self, amx):
+            offs = amx._getparam()
+            amx.PRI >>= offs
+
+        def shr_c_alt(self, amx):
+            offs = amx._getparam()
+            amx.ALT >>= offs
+
+
+        # Multiplication
+        def smul(self, amx):
+            amx.PRI *= amx.ALT
+        def smul_c(self, amx):
+            offs = amx._getparam()
+            amx.PRI *= offs
+
+
+        # Division
+        def sdiv(self, amx):
+            if amx.PRI == 0:
+                raise ZeroDivisionError
+
+            offs = amx._getparam()
+            amx.PRI = amx.PRI / offs
+            amx.ALT = amx.PRI % offs
+
+            if amx.ALT != 0 and (amx.AL ^ offs) < 0:
+                amx.PRI -= 1
+                amx.ALT += offs
+
+        def sdiv_alt(self, amx):
+            if amx.PRI == 0:
+                raise ZeroDivisionError
+
+            offs = amx._getparam()
+            amx.ALT = amx.ALT / offs
+            amx.PRI = amx.ALT % offs
+
+            if amx.PRI != 0 and (amx.PRI ^ offs) < 0:
+                amx.ALT -= 1
+                amx.PRI += offs
 
 
         # Bitwise operators
@@ -287,11 +397,10 @@ class SourcePawnAbstractMachine(object):
 
         # Subtracting
         def sub(self, amx):
+            amx.PRI = amx.PRI - amx.ALT
+        def sub_alt(self, amx):
             amx.PRI = amx.ALT - amx.PRI
 
-        def sub_alt(self, amx): raise NotImplementedError
-
-        def smul_c(self, amx): raise NotImplementedError
         def zero_s(self, amx): raise NotImplementedError
         def sign_pri(self, amx): raise NotImplementedError
         def sign_alt(self, amx): raise NotImplementedError
@@ -302,10 +411,7 @@ class SourcePawnAbstractMachine(object):
             amx.PRI = 1 if amx.PRI == amx.ALT else 0
         def neq(self, amx):
             amx.PRI = 1 if amx.PRI != amx.ALT else 0
-        def less(self, amx): raise NotImplementedError
-        def leq(self, amx): raise NotImplementedError
-        def grtr(self, amx): raise NotImplementedError
-        def geq(self, amx): raise NotImplementedError
+
         def sless(self, amx): raise NotImplementedError
         def sleq(self, amx): raise NotImplementedError
         def sgrtr(self, amx): raise NotImplementedError
@@ -315,9 +421,16 @@ class SourcePawnAbstractMachine(object):
 
 
         # Incrementation
-        def inc_pri(self, amx): raise NotImplementedError
-        def inc_alt(self, amx): raise NotImplementedError
-        def inc(self, amx): raise NotImplementedError
+        def inc_pri(self, amx):
+            amx.PRI += 1
+        def inc_alt(self, amx):
+            amx.ALT += 1
+
+        def inc(self, amx):
+            offs = cast_value(cell, amx._getparam())
+            val = amx._getheapcell(offs)
+            amx._writeheap(cell(val + 1))
+
         def inc_s(self, amx):
             offs = amx._getparam_p()
             addr = amx.FRM + offs
@@ -325,14 +438,37 @@ class SourcePawnAbstractMachine(object):
             amx._writeheap(addr, val)
             amx._stack_set(addr, val)
 
-        def inc_i(self, amx): raise NotImplementedError
-        def dec_pri(self, amx): raise NotImplementedError
-        def dec_alt(self, amx): raise NotImplementedError
-        def dec(self, amx): raise NotImplementedError
-        def dec_s(self, amx): raise NotImplementedError
-        def dec_i(self, amx): raise NotImplementedError
+        def inc_i(self, amx):
+            offs = cast_value(cell, amx.PRI)
+            val = amx._getheapcell(offs)
+            amx._writeheap(cell(val + 1))
+
+
+        # Decrementation
+        def dec_pri(self, amx):
+            amx.PRI -= 1
+        def dec_alt(self, amx):
+            amx.ALT -= 1
+
+        def dec(self, amx):
+            offs = cast_value(cell, amx._getparam())
+            val = amx._getheapcell(offs)
+            amx._writeheap(cell(val - 1))
+
+        def dec_s(self, amx):
+            offs = amx._getparam_p()
+            addr = amx.FRM + offs
+            val = cell(amx._getheapcell(addr) - 1)
+            amx._writeheap(addr, val)
+            amx._stack_set(addr, val)
+
+        def dec_i(self, amx):
+            offs = cast_value(cell, amx.PRI)
+            val = amx._getheapcell(offs)
+            amx._writeheap(cell(val - 1))
+
+
         def movs(self, amx): raise NotImplementedError
-        def cmps(self, amx): raise NotImplementedError
         def fill(self, amx): raise NotImplementedError
         def halt(self, amx):
             offs = amx._getparam()
@@ -340,18 +476,11 @@ class SourcePawnAbstractMachine(object):
             # TODO
 
         def bounds(self, amx): raise NotImplementedError
-        def sysreq_pri(self, amx): raise NotImplementedError
         def sysreq_c(self, amx): raise NotImplementedError
-        def file(self, amx): raise NotImplementedError
-        def line(self, amx): raise NotImplementedError
-        def symbol(self, amx): raise NotImplementedError
-        def srange(self, amx): raise NotImplementedError
-        def jump_pri(self, amx): raise NotImplementedError
         def switch_(self, amx): raise NotImplementedError
         def casetbl(self, amx): raise NotImplementedError
         def swap_pri(self, amx): raise NotImplementedError
         def swap_alt(self, amx): raise NotImplementedError
-        def symtag(self, amx): raise NotImplementedError
 
 
         def _macro_push_n(self, amx, n):
@@ -386,9 +515,6 @@ class SourcePawnAbstractMachine(object):
             self._macro_push_n_c(amx, 4)
         def push5_c(self, amx):
             self._macro_push_n_c(amx, 5)
-
-
-        def push_r(self, amx): raise NotImplementedError
 
 
         def _macro_push_n_s(self, amx, n):
@@ -448,8 +574,6 @@ class SourcePawnAbstractMachine(object):
             val = amx._getparam()
             amx._writeheap(amx.FRM + offs, cell(val))
 
-        def sysreq_d(self, amx): raise NotImplementedError
-        def sysreq_nd(self, amx): raise NotImplementedError
         def tracker_push_c(self, amx): raise NotImplementedError
         def tracker_pop_setheap(self, amx): raise NotImplementedError
         def genarray(self, amx): raise NotImplementedError
@@ -509,7 +633,10 @@ class SourcePawnAbstractMachine(object):
         # Instruction verification (match spcomp -a)
         self._verification = None
         self._func_offs = None  # dict(funcname=code_offs)
-        self._label_offs = None  # dict(labeltitle=code_offs)
+        self._label_offs = None # dict(labeltitle=code_offs)
+        self._offs_to_func = None   # dict(code_offs=funcname)
+        self._offs_to_label = None  # dict(code_offs=labeltitle)
+        self._label_offs = None # dict(labeltitle=code_offs)
         self._to_match = None   # The list of instructions to match
         self._executed = None   # The list of instructions executed
         self._processed = None  # A zipped list of the instructions executed
@@ -753,7 +880,13 @@ class SourcePawnAbstractMachine(object):
             if label_name is not None:
                 self._verification[label_name].append(instr_tuple)
 
+        self._offs_to_label = dict(zip(self._label_offs.values(), self._label_offs.keys()))
+        self._offs_to_func = dict(zip(self._func_offs.values(), self._func_offs.keys()))
+
     def _verify_jump(self, address, no_param=False):
+        if not self._verification:
+            return
+
         old_to_match = self._to_match[:1]
         self._to_match = list()
 
@@ -762,7 +895,7 @@ class SourcePawnAbstractMachine(object):
             self._to_match = self._verification[codename]
             # The ASM uses labels, so let's fake the label as a param
             if not no_param:
-                self._add_arg(self._asm_alias(codename))
+                self._add_arg(codename, label=True)
         else:
             print 'Verification fault:'
             print '  Unrecognized jump to 0x%08x' % address
@@ -783,6 +916,7 @@ class SourcePawnAbstractMachine(object):
                 if alias.startswith('l.'):
                     return alias[2:]
                 return alias
+
         except ValueError:
             pass
 
@@ -808,6 +942,14 @@ class SourcePawnAbstractMachine(object):
         elif code_offs in self._label_offs:
             funcname = self._label_offs[code_offs]
         return funcname
+
+    def _get_offs_by_name(self, name):
+        if name in self._offs_to_label:
+            return self._offs_to_label[name]
+        elif name in self._offs_to_func:
+            return self._offs_to_func[name]
+        return None
+
 
 
     def _execute(self, code_offs):
@@ -861,7 +1003,7 @@ class SourcePawnAbstractMachine(object):
                     faults += 1
                     print 'Verification fault (ASM line %d):' % expected[3]
                     print '%10s%s' % ('Expected: ', expected_instr)
-                    print '%10s%s' % ('Actual: ', actual_instr)
+                    print '%10s%s' % ('Found: ', actual_instr)
                     print
 
             print '%d verification fault%s' % (faults, "s"[faults==1:])

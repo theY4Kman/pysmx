@@ -2,6 +2,19 @@
 
 __all__ = ['sp_opcodes_list', 'opcodes']
 
+# Legend for Statuses:
+#
+# DONE       -> code generation is done
+# !GEN       -> code generation is deliberate skipped because:
+#                 (default): compiler does not generate
+#                DEPRECATED: this feature no longer exists/supported
+#               UNSUPPORTED: this opcode is not supported
+#                      TODO: done in case needed
+# VERIFIED   -> code generation is checked as run-time working.  prefixes:
+#                ! errors are not checked yet.
+#                - non-inline errors are not checked yet.
+#                ~ assumed checked because of related variation, but not actually checked
+
 sp_opcodes_list = [
     'invalid',
     'load_pri',
@@ -32,16 +45,16 @@ sp_opcodes_list = [
     'lidx_b',
     'idxaddr',
     'idxaddr_b',
-    'align_pri',
-    'align_alt',
-    'lctrl',
-    'sctrl',
+    'align_pri',    # !GEN :TODO: - only used for pack access, drop support in compiler first
+    'align_alt',    # !GEN :TODO: - only used for pack access, drop support in compiler first
+    'lctrl',        # !GEN
+    'sctrl',        # !GEN
     'move_pri',
     'move_alt',
     'xchg',
     'push_pri',
     'push_alt',
-    'push_r',
+    'push_r',       # !GEN DEPRECATED
     'push_c',
     'push',
     'push_s',
@@ -50,20 +63,20 @@ sp_opcodes_list = [
     'stack',
     'heap',
     'proc',
-    'ret',
+    'ret',          # !GEN
     'retn',
     'call',
-    'call_pri',
+    'call_pri',     # !GEN
     'jump',
-    'jrel',
+    'jrel',         # !GEN
     'jzer',
     'jnz',
     'jeq',
     'jneq',
-    'jless',
-    'jleq',
-    'jgrtr',
-    'jgeq',
+    'jless',        # !GEN
+    'jleq',         # !GEN
+    'jgrtr',        # !GEN
+    'jgeq',         # !GEN
     'jsless',
     'jsleq',
     'jsgrtr',
@@ -78,9 +91,9 @@ sp_opcodes_list = [
     'smul',
     'sdiv',
     'sdiv_alt',
-    'umul',
-    'udiv',
-    'udiv_alt',
+    'umul',         # !GEN
+    'udiv',         # !GEN
+    'udiv_alt',     # !GEN
     'add',
     'sub',
     'sub_alt',
@@ -100,10 +113,10 @@ sp_opcodes_list = [
     'sign_alt',
     'eq',
     'neq',
-    'less',
-    'leq',
-    'grtr',
-    'geq',
+    'less',         # !GEN
+    'leq',          # !GEN
+    'grtr',         # !GEN
+    'geq',          # !GEN
     'sless',
     'sleq',
     'sgrtr',
@@ -121,17 +134,17 @@ sp_opcodes_list = [
     'dec_s',
     'dec_i',
     'movs',
-    'cmps',
+    'cmps',         # !GEN
     'fill',
     'halt',
     'bounds',
-    'sysreq_pri',
+    'sysreq_pri',   # !GEN
     'sysreq_c',
-    'file',
-    'line',
-    'symbol',
-    'srange',
-    'jump_pri',
+    'file',         # !GEN DEPRECATED
+    'line',         # !GEN DEPRECATED
+    'symbol',       # !GEN DEPRECATED
+    'srange',       # !GEN DEPRECATED
+    'jump_pri',     # !GEN
     'switch_',
     'casetbl',
     'swap_pri',
@@ -139,7 +152,7 @@ sp_opcodes_list = [
     'push_adr',
     'nop',
     'sysreq_n',
-    'symtag',
+    'symtag',       # !GEN DEPRECATED
     'dbreak',
     'push2_c',
     'push2',
@@ -161,8 +174,8 @@ sp_opcodes_list = [
     'load_s_both',
     'const_',
     'const_s',
-    'sysreq_d',
-    'sysreq_nd',
+    'sysreq_d',     # !GEN UNSUPPORT
+    'sysreq_nd',    # !GEN UNSUPPORT
     'tracker_push_c',
     'tracker_pop_setheap',
     'genarray',
