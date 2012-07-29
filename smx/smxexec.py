@@ -117,6 +117,10 @@ class SourcePawnAbstractMachine(object):
             amx.PRI = amx._nativecall(offs, amx.STK)
             amx.STK += val * 4
 
+        def sysreq_c(self, amx):
+            native_index = amx._getparam()
+            amx._nativecall(native_index, amx.STK)
+
 
         def retn(self, amx):
             amx.FRM = amx._pop()
@@ -126,6 +130,9 @@ class SourcePawnAbstractMachine(object):
             amx.STK += amx._getstackcell() + sizeof(cell)
             # Keep our Python stack list updated
             amx._filter_stack(amx.STK)
+
+        def endproc(self, amx):
+            pass
 
         def zero_pri(self, amx):
             amx.PRI = 0
@@ -219,14 +226,30 @@ class SourcePawnAbstractMachine(object):
             elif number == 4:
                 amx._writeheap(amx.ALT, c_uint32(amx.PRI))
 
-        def lidx(self, amx): raise NotImplementedError
-        def lidx_b(self, amx): raise NotImplementedErrorz
-        def idxaddr(self, amx): raise NotImplementedError
-        def idxaddr_b(self, amx): raise NotImplementedError
+        def lidx(self, amx):
+            offs = amx.PRI + sizeof(cell) + amx.ALT
+            # TODO: verify address
+            amx.PRI = amx._getdatacell(offs)
 
-        def move_pri(self, amx): raise NotImplementedError
-        def move_alt(self, amx): raise NotImplementedError
-        def xchg(self, amx): raise NotImplementedError
+        def lidx_b(self, amx):
+            offs = amx._getparam()
+            offs = (amx.PRI << offs) + amx.ALT
+            # TODO: verify address
+            amx.PRI = amx._getdatacell(offs)
+
+        def idxaddr(self, amx):
+            amx.PRI = amx.PRI * sizeof(cell) + amx.ALT
+
+        def idxaddr_b(self, amx):
+            offs = amx._getparam()
+            amx.PRI = (amx.PRI << offs) + amx.ALT
+
+        def move_pri(self, amx):
+            amx.PRI = amx.ALT
+        def move_alt(self, amx):
+            amx.ALT = amx.PRI
+        def xchg(self, amx):
+            amx.ALT,amx.PRI = amx.PRI,amx.ALT
 
         def push_pri(self, amx):
             amx._push(amx.PRI)
@@ -401,9 +424,16 @@ class SourcePawnAbstractMachine(object):
         def sub_alt(self, amx):
             amx.PRI = amx.ALT - amx.PRI
 
-        def zero_s(self, amx): raise NotImplementedError
-        def sign_pri(self, amx): raise NotImplementedError
-        def sign_alt(self, amx): raise NotImplementedError
+        def zero_s(self, amx):
+            offs = amx._getparam()
+            amx._writeheap(amx.FRM + offs, cell(0))
+
+        def sign_pri(self, amx):
+            """Keeps lower 8 bits, sign extending"""
+            amx.PRI = (amx.PRI << 24) >> 24
+        def sign_alt(self, amx):
+            """Keeps lower 8 bits, sign extending"""
+            amx.PRI = (amx.PRI << 24) >> 24
 
 
         # Comparisons
@@ -411,13 +441,21 @@ class SourcePawnAbstractMachine(object):
             amx.PRI = 1 if amx.PRI == amx.ALT else 0
         def neq(self, amx):
             amx.PRI = 1 if amx.PRI != amx.ALT else 0
+        def sless(self, amx):
+            amx.PRI = 1 if amx.PRI < amx.ALT else 0
+        def sleq(self, amx):
+            amx.PRI = 1 if amx.PRI <= amx.ALT else 0
+        def sgrtr(self, amx):
+            amx.PRI = 1 if amx.PRI > amx.ALT else 0
+        def sgeq(self, amx):
+            amx.PRI = 1 if amx.PRI >= amx.ALT else 0
 
-        def sless(self, amx): raise NotImplementedError
-        def sleq(self, amx): raise NotImplementedError
-        def sgrtr(self, amx): raise NotImplementedError
-        def sgeq(self, amx): raise NotImplementedError
-        def eq_c_pri(self, amx): raise NotImplementedError
-        def eq_c_alt(self, amx): raise NotImplementedError
+        def eq_c_pri(self, amx):
+            val = amx._getparam()
+            amx.PRI = 1 if amx.PRI == val else 0
+        def eq_c_alt(self, amx):
+            val = amx._getparam()
+            amx.PRI = 1 if amx.ALT == val else 0
 
 
         # Incrementation
@@ -441,7 +479,7 @@ class SourcePawnAbstractMachine(object):
         def inc_i(self, amx):
             offs = cast_value(cell, amx.PRI)
             val = amx._getheapcell(offs)
-            amx._writeheap(cell(val + 1))
+            amx._writeheap(offs, cell(val + 1))
 
 
         # Decrementation
@@ -465,22 +503,61 @@ class SourcePawnAbstractMachine(object):
         def dec_i(self, amx):
             offs = cast_value(cell, amx.PRI)
             val = amx._getheapcell(offs)
-            amx._writeheap(cell(val - 1))
+            amx._writeheap(offs, cell(val - 1))
 
 
-        def movs(self, amx): raise NotImplementedError
-        def fill(self, amx): raise NotImplementedError
+        def movs(self, amx):
+            # TODO: verify addresses
+            bytes = amx._getparam()
+            memmove(addressof(amx.heap) + amx.ALT,
+                    addressof(amx.heap) + amx.PRI, bytes)
+
+        def fill(self, amx):
+            # TODO: verify addresses
+            offs = amx._getparam()
+            i = amx.ALT
+            while offs >= sizeof(cell):
+                amx._writeheap(i, amx.PRI)
+                i += sizeof(cell)
+                offs -= sizeof(cell)
+
         def halt(self, amx):
             offs = amx._getparam()
             amx._halt(offs)
             # TODO
 
-        def bounds(self, amx): raise NotImplementedError
-        def sysreq_c(self, amx): raise NotImplementedError
-        def switch_(self, amx): raise NotImplementedError
-        def casetbl(self, amx): raise NotImplementedError
-        def swap_pri(self, amx): raise NotImplementedError
-        def swap_alt(self, amx): raise NotImplementedError
+        def bounds(self, amx):
+            offs = amx._getparam()
+            # TODO: verify addresses
+
+        # switch()
+        def switch_(self, amx):
+            cptr = amx._jumprel(amx.CIP) + 1    # +1 to skip the CASETBL opcode
+            # TODO: assert amx.CIP == OP_CASETBL
+            amx.CIP = amx._jumprel(cptr + 1)    # preset to none-matched case
+            i = amx._getheapcell(cptr)          # number of records in the case table
+
+            # Check each case
+            while i > 0 and amx._getheapcell(cptr) != amx.PRI:
+                i -= 1
+                cptr += 2
+
+            if i > 0:
+                amx.CIP = amx._jumprel(cptr + 1)# case found
+
+        def casetbl(self, amx):
+            pass
+
+
+        def swap_pri(self, amx):
+            offs = amx._getheapcell(amx.STK)
+            amx._writeheap(amx.STK, amx.PRI)
+            amx.PRI = offs
+
+        def swap_alt(self, amx):
+            offs = amx._getheapcell(amx.STK)
+            amx._writeheap(amx.STK, amx.ALT)
+            amx.ALT = offs
 
 
         def _macro_push_n(self, amx, n):
@@ -580,7 +657,7 @@ class SourcePawnAbstractMachine(object):
         def genarray_z(self, amx): raise NotImplementedError
         def stradjust_pri(self, amx): raise NotImplementedError
         def stackadjust(self, amx): raise NotImplementedError
-        def endproc(self, amx): raise NotImplementedError
+
         def fabs(self, amx): raise NotImplementedError
         def float_(self, amx): raise NotImplementedError
         def floatadd(self, amx): raise NotImplementedError
