@@ -5,7 +5,7 @@ CODE 0	; 0
 
 
 DATA 2	; 0
-dump 2e342e31 65642d35 76 312f3730 30322f38 3231 303a3132 31333a31 0 5 0 c 18 
+dump 2e342e31 65642d35 76 322f3730 30322f39 3231 353a3731 39333a32 0 5 0 c 18 
 dump 0 0 0
 dump 0
 dump 65726f43 0 65726f63 0 44 4c 0 0 
@@ -125,6 +125,12 @@ l.8c		; f8
 	push.c 0
 	call Test
 	;$exp
+	; line 14
+	break	; 1a0
+	push4.c 0 5 3 3f800000
+	;$par
+	sysreq.n 3 4
+	;$exp
 	stack 4
 	zero.pri
 	retn
@@ -134,12 +140,12 @@ DATA 0	; 12c
 dump 66207325 74636e75 256e6f69 6f772063 25206b72 20252564 2d2f2b28 332e2520 6f202966 68742066 69742065 2021656d 6c206f4e 65676e6f 78302072 2d207825 
 dump 6f6e202d 65772077 20657227 58257830 21 6d726f46 7461 
 
-CODE 0	; 1b0
+CODE 0	; 1d4
 	proc	; Test
-	; line 16
-	break	; 1b4
-	; line 17
-	break	; 1b8
+	; line 18
+	break	; 1d8
+	; line 19
+	break	; 1dc
 	push.c 188
 	;$par
 	sysreq.n 2 1
@@ -150,5 +156,26 @@ CODE 0	; 1b0
 
 DATA 0	; 188
 dump 6c6c6143 54206465 28747365 29 
+
+CODE 0	; 1fc
+	proc	; Timer_Callback
+	; line 1d
+	break	; 200
+	;$lcl data 10
+	;$lcl timer c
+	; line 1e
+	break	; 204
+	push.adr 10
+	;$par
+	push.c 198
+	;$par
+	sysreq.n 2 2
+	;$exp
+	zero.pri
+	retn
+
+
+DATA 0	; 198
+dump 656d6954 69662072 20646572 68746977 6425203a 0 
 
 STKSIZE 1000

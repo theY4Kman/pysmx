@@ -2,8 +2,9 @@ from functools import wraps
 import re
 from ctypes import *
 from .smxdefs import *
+from .newstruct import cast_value
 
-__all__ = ['SourceModNatives']
+__all__ = ['SourceModNatives', 'SourceModSystem']
 
 
 RGX_NUMBER = re.compile(r'[-+]?\d+')
@@ -269,19 +270,26 @@ def atcprintf(_amx, _fmt, _params, _arg, formatter=PrintfFormatter()):
     return state.out
 
 
+def sp_ctof(value):
+    """Takes a raw value and ctypes casts it to a Python float value"""
+    cf = pointer(c_long(value))
+    return cast_value(c_float, cf)
+
+
 def native(f):
     """Labels a function/method as a native"""
     f.is_native = True
     return f
 
 class SourceModNatives(object):
-    def __init__(self, amx):
+    def __init__(self, sys):
         """
-        @type   amx: smx.smxexec.SourcePawnAbstractMachine
-        @param  amx: The abstract machine owning these natives
+        @type   sys: smx.sourcemod.SourceModSystem
+        @param  sys: The SourceMod system emulator owning these natives
         """
-        self.amx = amx
-        self.runtime = amx.plugin.runtime
+        self.sys = sys
+        self.amx = self.sys.amx
+        self.runtime = self.amx.plugin.runtime
 
     def printf(self, msg):
         return self.runtime.printf(msg)
@@ -299,3 +307,88 @@ class SourceModNatives(object):
         fmt = self.amx._local_to_string(params[1])
         out = atcprintf(self.amx, fmt, params, 2)
         self.printf(out)
+
+    @native
+    def CreateTimer(self, params):
+        """
+        native Handle:CreateTimer(Float:interval, Timer:func, any:data=INVALID_HANDLE, flags=0)
+
+        Creates a basic timer.  Calling CloseHandle() on a timer will end the timer.
+
+        @param interval    Interval from the current game time to execute the given function.
+        @param func        Function to execute once the given interval has elapsed.
+        @param data        Handle or value to pass through to the timer callback function.
+        @param flags       Flags to set (such as repeatability or auto-Handle closing).
+        @return            Handle to the timer object.  You do not need to call CloseHandle().
+                               If the timer could not be created, INVALID_HANDLE will be returned.
+        """
+        interval = sp_ctof(params[1])
+        func = params[2]
+        data = params[3]
+        flags = params[4]
+
+        for i,param in enumerate(params[1:params[0]+1]):
+            print 'params[%d] = 0x%08x' % (i,param)
+        print 'Interval: %f, func: %d, data: %d, flags: %d' % (interval, func, data, flags)
+
+        return self.sys.timers.create_timer(interval, func, data, flags)
+
+
+
+class SourceModHandles(object):
+    """Emulates SourceMod's handles"""
+
+
+class SourceModTimers(object):
+    """Handles SourceMod timers"""
+
+    TIMER_REPEAT = (1<<0)               # Timer will repeat until it returns Plugin_Stop
+    TIMER_FLAG_NO_MAPCHANGE = (1<<1)    # Timer will not carry over mapchanges
+    TIMER_HNDL_CLOSE = (1<<9)           # Deprecated define, replaced by below
+    TIMER_DATA_HNDL_CLOSE = (1<<9)      # Timer will automatically call CloseHandle() on its data when finished
+
+    def __init__(self, sys):
+        """
+        @type   sys: smx.sourcemod.SourceModSystem
+        @param  sys: The SourceMod system emulator owning these natives
+        """
+        self.sys = sys
+
+    def create_timer(self, interval, callback, data, flags):
+        """
+        BAD BAD BAD BAD BAD BAD BAD BAD
+        RACE CONDITION GALORE
+        We cannot rely on Python's timers, as they can fire when other code is
+        being executed by the AMX. So we'll have to implement our own game
+        ticks, checking the timers ourselves at the top of each frame.
+        """
+        import threading
+
+        def timer_callback():
+            self.sys.runtime.call_function(callback, data)
+
+        timer = threading.Timer(interval, timer_callback)
+        timer.start()
+
+
+class SourceModSystem(object):
+    """Emulates all SourcePawn -> SourceMod interactions"""
+
+    def __init__(self, amx):
+        """
+        @type   amx: smx.smxexec.SourcePawnAbstractMachine
+        @param  amx: The abstract machine owning these natives
+        """
+        self.amx = amx
+        self.plugin = self.amx.plugin
+        self.runtime = self.plugin.runtime
+
+        self.natives = SourceModNatives(self)
+        self.timers = SourceModTimers(self)
+
+        self.tickrate = 66
+        self.interval_per_tick = 1.0 / self.tickrate
+
+    def game_frame(self):
+        pass
+

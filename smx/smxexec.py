@@ -80,11 +80,6 @@ class SourcePawnAbstractMachine(object):
             offs = amx._getparam()
             amx.ALT = amx._getheapcell(amx.FRM + offs)
 
-        def proc(self, amx):
-            amx._push(amx.FRM)
-            amx.FRM = amx.STK
-            # TODO: CHKMARGIN
-
         def lref_s_pri(self, amx):
             offs = amx._getparam()
             offs = amx._getdatacell(amx.FRM + offs)
@@ -111,25 +106,39 @@ class SourcePawnAbstractMachine(object):
 
         # Native calls
         def sysreq_n(self, amx):
-            offs = amx._getparam()
-            val = amx._getparam()
-            amx._push(val)
-            amx.PRI = amx._nativecall(offs, amx.STK)
-            amx.STK += val * 4
+            native_index = amx._getparam()
+            num_params = amx._getparam()
+            amx._push(num_params)
+            amx.PRI = amx._nativecall(native_index, amx.STK)
+            amx.STK += num_params * sizeof(cell) # +1 to remove number of params
+            # keep our Python stack in check
+            amx._filter_stack(amx.STK)
 
         def sysreq_c(self, amx):
             native_index = amx._getparam()
             amx._nativecall(native_index, amx.STK)
+            # keep our Python stack in check
+            amx._filter_stack(amx.STK)
 
+
+        def call(self, amx):
+            amx._push(amx.CIP + sizeof(cell))
+            amx.CIP = amx._jumprel(amx.CIP)
 
         def retn(self, amx):
             amx.FRM = amx._pop()
             offs = amx._pop()
             # TODO: verify return address
             amx.CIP = offs
+            # +sizeof(cell) to pop number of params
             amx.STK += amx._getstackcell() + sizeof(cell)
             # Keep our Python stack list updated
             amx._filter_stack(amx.STK)
+
+        def proc(self, amx):
+            amx._push(amx.FRM)
+            amx.FRM = amx.STK
+            # TODO: CHKMARGIN
 
         def endproc(self, amx):
             pass
@@ -274,10 +283,6 @@ class SourcePawnAbstractMachine(object):
             amx.ALT = amx.HEA
             amx.HEA += offs
             # TODO: CHKMARGIN CHKHEAP
-
-        def call(self, amx):
-            amx._push(amx.CIP + sizeof(cell))
-            amx.CIP = amx._jumprel(amx.CIP)
 
 
         # Jumps
@@ -700,8 +705,9 @@ class SourcePawnAbstractMachine(object):
         self.data = None # Actual data section in memory
         self.code = None # Code section in memory
 
-        self.sm_natives = None # Our local copy of the SourceMod Python natives
-        self.instructions = None # The SMX instructions methods
+        self.smsys = None           # Our local copy of the SourceMod system emulator
+        self.sm_natives = None      # Our local copy of the SourceMod Python natives
+        self.instructions = None    # The SMX instructions methods
 
         # Records the current stack in a list
         # Each item is (data_offset, c_type())
@@ -720,7 +726,8 @@ class SourcePawnAbstractMachine(object):
                                 # and expected
 
         self.instr = None # The current instruction being executed
-        self.halted = None # Whether a halt instruction has been executed
+        self.halted = None  # Whether code is running (i.e. a halt instruction)
+                            # has not been encountered since execution start
 
     def init(self):
         self.COD = self.plugin.pcode.pcode
@@ -733,7 +740,8 @@ class SourcePawnAbstractMachine(object):
         self.STP = len(self.heap)
         self.STK = self.STP
 
-        self.sm_natives = SourceModNatives(self)
+        self.smsys = SourceModSystem(self)
+        self.sm_natives = self.smsys.natives
         self.instructions = self.SMXInstructions()
 
         self._stack = []
@@ -869,7 +877,7 @@ class SourcePawnAbstractMachine(object):
 
     def _nativecall(self, index, paramoffs):
         try:
-            native = self.plugin.natives.values()[index-1]
+            native = self.plugin.natives.values()[index]
         except IndexError:
             raise SourcePawnPluginNativeError('Invalid native index %d' % index)
 
@@ -883,6 +891,24 @@ class SourcePawnAbstractMachine(object):
         params_ptr.contents.value += paramoffs
 
         pyfunc(params)
+
+    def _pubcall(self, func_id):
+        if not func_id & 1:
+            raise SourcePawnPluginError(
+                'Invalid public function ID %d' % func_id)
+
+        index = func_id >> 1
+
+        try:
+            func = self.plugin.publics.values()[index]
+        except IndexError:
+            raise SourcePawnPluginError(
+                'Invalid public function index %d' % index)
+
+        self._execute(func.code_offs)
+
+    def _calloffs(self, offs, verify_offs=False):
+        self._execute(offs, verify_offs)
 
 
     def _verify_asm(self, asm):
@@ -1028,12 +1054,11 @@ class SourcePawnAbstractMachine(object):
         return None
 
 
-
-    def _execute(self, code_offs):
+    def _execute(self, code_offs, verify_offs=True):
         if not self.initialized:
             self.init()
 
-        if self._verification:
+        if verify_offs and self._verification:
             funcname = self._get_funcname_by_offs(code_offs)
             if funcname is None:
                 raise SourcePawnVerificationError(
@@ -1043,6 +1068,7 @@ class SourcePawnAbstractMachine(object):
                 raise SourcePawnVerificationError(
                     'Function %s not found in ASM source' % funcname)
 
+        self.halted = False
         self.CIP = code_offs
         while not self.halted and self.CIP < self.plugin.pcode.size:
             if self._verification:
@@ -1054,11 +1080,13 @@ class SourcePawnAbstractMachine(object):
             self.instr = c
             op = c & ((1 << sizeof(cell)*4)-1)
 
-            if self._verification:
-                self._executed.append((opcodes[op], list(), None, None))
+            opname = opcodes[op]
 
-            if hasattr(self.instructions, opcodes[op]):
-                getattr(self.instructions, opcodes[op])(self)
+            if self._verification:
+                self._executed.append((opname, list(), None, None))
+
+            if hasattr(self.instructions, opname):
+                getattr(self.instructions, opname)(self)
             else:
                 ######################
                 print opcodes[op]
@@ -1133,6 +1161,14 @@ class SourcePawnPluginRuntime(object):
             return func
 
         return None
+
+    def call_function(self, pubindex, *args):
+        i = 0
+        for arg in args:
+            self.amx._push(arg)
+            i += 1
+        self.amx._push(i)
+        self.amx._pubcall(pubindex)
 
     def run(self, main='OnPluginStart'):
         """Executes the plugin's main function"""

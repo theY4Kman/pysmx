@@ -1,3 +1,4 @@
+from collections import OrderedDict
 import zlib
 from ctypes import *
 from newstruct import *
@@ -484,7 +485,7 @@ class SourcePawnPlugin(object):
         if '.publics' in sections:
             sect = sections['.publics']
 
-            self.publics = {}
+            self.publics = OrderedDict()
             self.publics_by_offs = {}
             _publicsize = sizeof(self.sp_file_publics)
             self.num_publics = sect.size / _publicsize
@@ -525,7 +526,7 @@ class SourcePawnPlugin(object):
         if '.natives' in sections:
             sect = sections['.natives']
 
-            self.natives = {}
+            self.natives = OrderedDict()
             self.num_natives = sect.size / sizeof(self.sp_file_natives)
 
             # Make our Struct array for easy access
