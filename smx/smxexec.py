@@ -110,7 +110,7 @@ class SourcePawnAbstractMachine(object):
             num_params = amx._getparam()
             amx._push(num_params)
             amx.PRI = amx._nativecall(native_index, amx.STK)
-            amx.STK += num_params * sizeof(cell) # +1 to remove number of params
+            amx.STK += (num_params + 1) * sizeof(cell) # +1 to remove number of params
             # keep our Python stack in check
             amx._filter_stack(amx.STK)
 
@@ -879,7 +879,8 @@ class SourcePawnAbstractMachine(object):
         try:
             native = self.plugin.natives.values()[index]
         except IndexError:
-            raise SourcePawnPluginNativeError('Invalid native index %d' % index)
+            raise SourcePawnPluginNativeError(
+                'Invalid native index %d' % index)
 
         pyfunc = self.sm_natives.get_native(native.name)
         if pyfunc is None:
