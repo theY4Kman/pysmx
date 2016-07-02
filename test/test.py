@@ -17,7 +17,7 @@ def test_smx_file(path_to_test_smx):
         yield fp
 
 
-@pytest.mark.skipif(True, 'Abandoned interpret.cpp port for now')
+@pytest.mark.skipif(True, reason='Abandoned interpret.cpp port for now')
 def test_interpreter(test_smx_file):
     plugin = SourcePawnPlugin(test_smx_file)
     interpreter = Interpreter(plugin)
