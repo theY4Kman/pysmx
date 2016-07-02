@@ -1,8 +1,9 @@
-from datetime import datetime
 import string
 import struct
-from ctypes import *
 import sys
+from ctypes import *
+from datetime import datetime
+
 from .sourcemod import *
 from .smxdefs import *
 from .newstruct import cast_value
@@ -17,6 +18,15 @@ class SourcePawnOpcodeNotSupported(SourcePawnOpcodeDeprecated):
     pass
 class SourcePawnOpcodeNotGenerated(SourcePawnOpcodeDeprecated):
     pass
+
+
+class Done(Exception):
+    def __init__(self, rval):
+        self.rval = rval
+
+    def __str__(self):
+        # Haaaaack
+        return self.rval
 
 
 def list_pop(lst, index=-1, default=None):
@@ -126,7 +136,7 @@ class SourcePawnAbstractMachine(object):
             amx.CIP = amx._jumprel(amx.CIP)
 
         def retn(self, amx):
-            amx.FRM = amx._pop()
+            amx.FRM = 0  # TODO: actual last frame
             offs = amx._pop()
             # TODO: verify return address
             amx.CIP = offs
@@ -134,6 +144,7 @@ class SourcePawnAbstractMachine(object):
             amx.STK += amx._getstackcell() + sizeof(cell)
             # Keep our Python stack list updated
             amx._filter_stack(amx.STK)
+            raise Done(amx.PRI)
 
         def proc(self, amx):
             amx._push(amx.FRM)
@@ -942,12 +953,18 @@ class SourcePawnAbstractMachine(object):
 
         last_offs = None
         cur_offs = 0
-        for lineno,line in lines:
+        cur_section = None
+        for lineno, line in lines:
             # Lines starting with capital letters are sections, ignore them
             if line[0].isupper():
+                cur_section = line.split(' ', 1)[0]
                 if line.startswith('CODE'):
                     offs = line[line.rfind(';')+1:].strip()
                     cur_offs = last_offs = int(offs, 16)
+                continue
+
+            # Skip dump dummy instructions under DATA sections
+            if cur_section == 'DATA':
                 continue
 
             spl = line.split(';', 1)
@@ -1038,24 +1055,36 @@ class SourcePawnAbstractMachine(object):
             self._processed[offset][1][1].append(arg)
 
     def _get_funcname_by_offs(self, code_offs):
-        funcname = None
         if code_offs in self.plugin.publics_by_offs:
-            funcname = self.plugin.publics_by_offs[code_offs].name
+            return self.plugin.publics_by_offs[code_offs].name
         elif code_offs in self._func_offs:
-            funcname = self._func_offs[code_offs]
+            return self._func_offs[code_offs]
         elif code_offs in self._label_offs:
-            funcname = self._label_offs[code_offs]
-        return funcname
+            return self._label_offs[code_offs]
 
     def _get_offs_by_name(self, name):
         if name in self._offs_to_label:
             return self._offs_to_label[name]
         elif name in self._offs_to_func:
             return self._offs_to_func[name]
-        return None
+
+
+    def _dummy_frame(self):
+        """
+        When OnPluginStart retns, it expects a frame already setup, so it can
+        retn to the program exit point.
+        """
+        # XXX ##########################################################################
+        # self.FRM = 0
+        # self.STK = self.STP
+        # self._push(0)
+        # XXX ##########################################################################
 
 
     def _execute(self, code_offs, verify_offs=True):
+        orig_frm = self.FRM
+        rval = None
+
         if not self.initialized:
             self.init()
 
@@ -1072,25 +1101,12 @@ class SourcePawnAbstractMachine(object):
         self.halted = False
         self.CIP = code_offs
         while not self.halted and self.CIP < self.plugin.pcode.size:
-            if self._verification:
-                codename = self._get_funcname_by_offs(self.CIP)
-                if codename is not None:
-                    self._to_match = self._verification[codename][:]
-
-            c = self._instr()
-            self.instr = c
-            op = c & ((1 << sizeof(cell)*4)-1)
-
-            opname = opcodes[op]
-
-            if self._verification:
-                self._executed.append((opname, list(), None, None))
-
-            if hasattr(self.instructions, opname):
-                getattr(self.instructions, opname)(self)
-            else:
-                ######################
-                print opcodes[op]
+            should_return = False
+            try:
+                self._step()
+            except Done as e:
+                rval = e.rval
+                should_return = True
 
             # Update our processed instructions list
             if self._verification and self._executed:
@@ -1098,10 +1114,15 @@ class SourcePawnAbstractMachine(object):
                 executed = self._executed.pop(0)
                 self._processed.append((matched, executed))
 
+            if should_return:
+                break
+
         if self._verification:
             faults = 0
             self._processed += zip(self._to_match, self._executed)
             for expected,actual in self._processed:
+                if not expected:
+                    expected = ('<blank>', '<blank>', '<blank>', -1)
                 expected_instr = ' '.join((expected[0],) + tuple(expected[1]))
                 actual_instr = ' '.join((actual[0],) + tuple(actual[1]))
 
@@ -1114,6 +1135,30 @@ class SourcePawnAbstractMachine(object):
 
             print '%d verification fault%s' % (faults, "s"[faults==1:])
 
+        return rval
+
+    def _step(self):
+        if self._verification:
+            codename = self._get_funcname_by_offs(self.CIP)
+            if codename is not None:
+                self._to_match = self._verification[codename][:]
+
+        c = self._instr()
+        self.instr = c
+        op = c & ((1 << sizeof(cell)*4)-1)
+
+        opname = opcodes[op]
+
+        if self._verification:
+            self._executed.append((opname, list(), None, None))
+
+        if hasattr(self.instructions, opname):
+            op_handler = getattr(self.instructions, opname)
+            op_handler(self)
+        else:
+            ######################
+            print opcodes[op]
+
 
 class PluginFunction(object):
     def __init__(self, runtime, func_id, code_offs):
@@ -1125,7 +1170,7 @@ class PluginFunction(object):
         self.code_offs = code_offs
 
     def __call__(self, *args, **kwargs):
-        self.runtime.amx._execute(self.code_offs)
+        return self.runtime.amx._execute(self.code_offs)
 
 
 class SourcePawnPluginRuntime(object):
@@ -1141,6 +1186,8 @@ class SourcePawnPluginRuntime(object):
         self.amx = SourcePawnAbstractMachine(self, self.plugin)
 
         self.pubfuncs = {}
+
+        self.last_tick = None
 
         # Saves all the lines printed to the server console
         self.console = [] # list((datetime, msg_str))
@@ -1163,6 +1210,12 @@ class SourcePawnPluginRuntime(object):
 
         return None
 
+    def call_function_by_name(self, name, *args, **kwargs):
+        func = self.get_function_by_name(name)
+        if not func:
+            raise NameError('"%s" is not a valid public function name' % name)
+        return func(*args, **kwargs)
+
     def call_function(self, pubindex, *args):
         i = 0
         for arg in args:
@@ -1173,5 +1226,11 @@ class SourcePawnPluginRuntime(object):
 
     def run(self, main='OnPluginStart'):
         """Executes the plugin's main function"""
+        self.amx.init()
+        self.amx.smsys.tick()
+
+        self.amx._dummy_frame()
         func = self.get_function_by_name(main)
         func()
+
+        self.amx.smsys.timers.poll_for_timers()

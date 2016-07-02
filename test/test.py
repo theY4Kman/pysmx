@@ -1,7 +1,38 @@
-import sys
-sys.path.append('..')
+import os
 
-if __name__ == '__main__':
+import pytest
+
+from smx import SourcePawnPlugin
+from smx.interpreter import Interpreter
+
+
+@pytest.fixture(scope='session')
+def path_to_test_smx(TEST_DIR):
+    return os.path.join(TEST_DIR, 'test.smx')
+
+
+@pytest.yield_fixture
+def test_smx_file(path_to_test_smx):
+    with open(path_to_test_smx, 'rb') as fp:
+        yield fp
+
+
+def test_interpreter(test_smx_file):
+    plugin = SourcePawnPlugin(test_smx_file)
+    interpreter = Interpreter(plugin)
+    assert interpreter.call_function_by_name('OnPluginStart') == 1337
+
+
+#XXX############################################################################################### don't commit me!
+@pytest.mark.test
+#XXX############################################################################################### don't commit me!
+def test_original_interpreter(test_smx_file):
+    plugin = SourcePawnPlugin(test_smx_file)
+    assert plugin.runtime.call_function_by_name('ReturnTwentyThree') == 23
+
+
+
+def legacy_test():
     import os.path
     import sys
     from smx import SourcePawnPlugin

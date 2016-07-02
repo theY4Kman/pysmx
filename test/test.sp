@@ -29,3 +29,11 @@ public Action:Timer_Callback(Handle:timer, any:data)
 {
     PrintToServer("Timer fired with: %d", data);
 }
+
+public ReturnTwentyThree() {
+    return ReturnTwentyThreeInner();
+}
+
+ReturnTwentyThreeInner() {
+    return 23;
+}
