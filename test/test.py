@@ -17,15 +17,13 @@ def test_smx_file(path_to_test_smx):
         yield fp
 
 
+@pytest.mark.skipif(True, 'Abandoned interpret.cpp port for now')
 def test_interpreter(test_smx_file):
     plugin = SourcePawnPlugin(test_smx_file)
     interpreter = Interpreter(plugin)
     assert interpreter.call_function_by_name('OnPluginStart') == 1337
 
 
-#XXX############################################################################################### don't commit me!
-@pytest.mark.test
-#XXX############################################################################################### don't commit me!
 def test_original_interpreter(test_smx_file):
     plugin = SourcePawnPlugin(test_smx_file)
     assert plugin.runtime.call_function_by_name('ReturnTwentyThree') == 23
