@@ -364,7 +364,7 @@ sp_opcodes_list = [
   'genarray',
 """
 
-class SPOpcodes(object):
+class SourcePawnOpcodes(object):
     def __init__(self):
         self._op_to_name = {}
         self._name_to_op = {}
@@ -385,4 +385,4 @@ class SPOpcodes(object):
         except KeyError:
             raise AttributeError('There is no "%s" opcode' % item)
 
-opcodes = SPOpcodes()
+opcodes = SourcePawnOpcodes()

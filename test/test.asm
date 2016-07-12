@@ -5,7 +5,7 @@ CODE 0	; 0
 
 
 DATA 2	; 0
-dump 2e382e31 39352e30 3531 302f3730 30322f32 3631 353a3030 38353a33 0 5 0 c 18 
+dump 2e382e31 39352e30 3531 312f3730 30322f31 3631 353a3032 31353a30 0 5 0 c 18 
 dump 0 0 0
 dump 0
 dump 65726f43 0 65726f63 0 44 4c 0 0 
@@ -910,22 +910,31 @@ CODE 0	; ce8
 
 DATA 0	; 98c
 dump 656d6954 69662072 20646572 68746977 6425203a 0 
+dump 539 
 
 CODE 0	; d18
-	proc	; ReturnTwentyThree
-	; line 21
-	break	; d1c
+	proc	; ReturnGlobal
 	; line 22
+	break	; d1c
+	; line 23
 	break	; d20
+	load.pri 9a4
+	retn
+
+	proc	; ReturnTwentyThree
+	; line 26
+	break	; d34
+	; line 27
+	break	; d38
 	push.c 0
 	call ReturnTwentyThreeInner
 	retn
 
 	proc	; ReturnTwentyThreeInner
-	; line 25
-	break	; d3c
-	; line 26
-	break	; d40
+	; line 2a
+	break	; d54
+	; line 2b
+	break	; d58
 	const.pri 17
 	retn
 

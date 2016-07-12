@@ -3,24 +3,22 @@ import time
 from ctypes import *
 from functools import wraps
 
-from .engine import engine_time
-from .smxdefs import *
-from .newstruct import cast_value
+from smx.engine import engine_time
+from smx.definitions import *
+from smx.exceptions import SourcePawnStringFormatError
+from smx.struct import cast_value
 
 __all__ = ['SourceModNatives', 'SourceModSystem']
 
 
 RGX_NUMBER = re.compile(r'[-+]?\d+')
 
-FMT_LADJUST     = 0x00000004 # left adjustment
-FMT_ZEROPAD     = 0x00000080 # zero (as opposed to blank) pad
-FMT_UPPERDIGITS = 0x00000200 # make alpha digits uppercase
+FMT_LADJUST     = 0x00000004  # left adjustment
+FMT_ZEROPAD     = 0x00000080  # zero (as opposed to blank) pad
+FMT_UPPERDIGITS = 0x00000200  # make alpha digits uppercase
 
 NULL = 0
 
-
-class SourcePawnStringFormatError(SourcePawnPluginNativeError):
-    pass
 
 def _check_fmt_args(x, arg, args):
     if (arg + x) > args:
@@ -32,7 +30,8 @@ def _check_fmt_args(x, arg, args):
 def has_flag(v, flag):
     return (v & flag) == flag
 def has_flags(v, flags):
-    return all(map(lambda f: has_flag(v,f), flags))
+    # TODO: use generator to allow for early escape (profile first)
+    return all(map(lambda f: has_flag(v, f), flags))
 
 
 def atoi(s, length=False):
@@ -389,7 +388,7 @@ class SourceModSystem(object):
 
     def __init__(self, amx):
         """
-        @type   amx: smx.smxexec.SourcePawnAbstractMachine
+        @type   amx: smx.vm.SourcePawnAbstractMachine
         @param  amx: The abstract machine owning these natives
         """
         self.amx = amx

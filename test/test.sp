@@ -30,6 +30,11 @@ public Action:Timer_Callback(Handle:timer, any:data)
     PrintToServer("Timer fired with: %d", data);
 }
 
+new i_GlobalValue = 1337;
+public ReturnGlobal() {
+    return i_GlobalValue;
+}
+
 public ReturnTwentyThree() {
     return ReturnTwentyThreeInner();
 }
