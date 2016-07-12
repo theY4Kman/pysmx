@@ -19,7 +19,8 @@ INCLUDE_DIR = os.path.join(PKG_DIR, 'include')
 def _get_compiler_name():
     return {
         'win32': 'spcomp.exe',
-        # TODO: OSX and Linux
+        'linux2': 'spcomp.elf',
+        'darwin': 'spcomp.macho',
     }.get(sys.platform)
 
 
