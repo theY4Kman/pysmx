@@ -32,24 +32,31 @@ def _get_compiler_path():
     return _abs_compiler_path(_get_compiler_name())
 
 
-def compile_to_string(code, **options):
-    compiler = _get_compiler_path()
+def compile_to_string(code, assemble=False, include_dir=INCLUDE_DIR,
+                      extra_args=''):
     fp = NamedTemporaryFile(prefix='tmp_plugin', suffix='.sp', delete=False)
     fp.write(code)
     fp.flush()
 
-    out = NamedTemporaryFile(prefix='tmp_plugin', suffix='.smx', delete=False)
+    out_suffix = '.asm' if assemble else '.smx'
+    out = NamedTemporaryFile(prefix='tmp_plugin', suffix=out_suffix, delete=False)
     try:
         # Files must be closed first, so spcomp can open it on Windows
         fp.close()
         out.close()
 
-        check_call([
-            compiler,
-            '-i', INCLUDE_DIR,
-            '-o', out.name,
-            fp.name,
-        ])
+        compiler = _get_compiler_path()
+        args = [compiler]
+        if include_dir:
+            args += ['-i', include_dir]
+        if assemble:
+            args.append('-a')
+        args += ['-o', out.name]
+        if extra_args:
+            args.append(extra_args)
+        args.append(fp.name)
+
+        check_call(args)
 
         with open(out.name, 'rb') as compiled:
             return compiled.read()
@@ -62,4 +69,9 @@ def compile(code, **options):
     """Compile SourcePawn code to a pysmx plugin"""
     smx = compile_to_string(code, **options)
     fp = StringIO(smx)
-    return SourcePawnPlugin(fp)
+    plugin = SourcePawnPlugin(fp)
+
+    asm = compile_to_string(code, assemble=True, **options)
+    plugin.runtime.amx._verify_asm(asm)
+
+    return plugin

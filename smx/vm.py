@@ -515,13 +515,6 @@ class PluginFunction(object):
 
     def __call__(self, *args, **kwargs):
         rval = self.runtime.amx._execute(self.code_offs)
-
-        # Newer SourcePawn has syntactical sugar allowing a function to return
-        # a string directly.
-        #XXX############################################################################################### don't commit me!
-        #XXX############################################################################################### don't commit me!
-        #XXX############################################################################################### don't commit me!
-        #XXX############################################################################################### don't commit me!
         return rval
 
 
