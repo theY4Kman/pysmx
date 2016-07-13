@@ -68,6 +68,7 @@ class SourcePawnAbstractMachine(object):
         self._stack = None
 
         # Instruction verification (match spcomp -a)
+        self.print_verification = False
         self._verification = None
         self._func_offs = None  # dict(funcname=code_offs)
         self._label_offs = None # dict(labeltitle=code_offs)
@@ -362,7 +363,7 @@ class SourcePawnAbstractMachine(object):
             # The ASM uses labels, so let's fake the label as a param
             if not no_param:
                 self._add_arg(codename, label=True)
-        else:
+        elif self.print_verification:
             print 'Verification fault:'
             print '  Unrecognized jump to 0x%08x' % address
 
@@ -471,14 +472,15 @@ class SourcePawnAbstractMachine(object):
                 expected_instr = ' '.join((expected[0],) + tuple(expected[1]))
                 actual_instr = ' '.join((actual[0],) + tuple(actual[1]))
 
-                if expected_instr != actual_instr:
+                if expected_instr != actual_instr and self.print_verification:
                     faults += 1
                     print 'Verification fault (ASM line %d):' % expected[3]
                     print '%10s%s' % ('Expected: ', expected_instr)
                     print '%10s%s' % ('Found: ', actual_instr)
                     print
 
-            print '%d verification fault%s' % (faults, "s"[faults==1:])
+            if self.print_verification:
+                print '%d verification fault%s' % (faults, "s"[faults==1:])
 
         return rval
 

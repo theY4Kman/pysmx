@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 from subprocess import check_call
 from tempfile import NamedTemporaryFile
@@ -56,7 +57,7 @@ def compile_to_string(code, assemble=False, include_dir=INCLUDE_DIR,
             args.append(extra_args)
         args.append(fp.name)
 
-        check_call(args)
+        check_call(args, stdout=subprocess.PIPE)
 
         with open(out.name, 'rb') as compiled:
             return compiled.read()

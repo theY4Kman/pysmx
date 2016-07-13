@@ -1,10 +1,75 @@
+import hypothesis.strategies as st
 import pytest
+from hypothesis import given
 
-from smx.compiler import compile
+import smx.compiler
+
+
+@pytest.fixture(scope='session')
+def compile():
+    def compile(code, **options):
+        # TODO: auto-insert #include <sourcemod> and default Plugin:myinfo
+        plugin = smx.compiler.compile(code)
+        plugin.runtime.amx.print_verification = False
+        return plugin
+    return compile
+
+
+@pytest.mark.parametrize('value', [True, False])
+def test_bool_literal_return(value, compile):
+    plugin = compile('''
+        public Test() {
+            return %s;
+        }
+    ''' % ('true' if value else 'false'))
+    rval = plugin.runtime.call_function_by_name('Test')
+    # TODO
+    # assert rval is value
+    assert rval == value
+
+
+@pytest.mark.parametrize('integer', [
+    0,
+    1,
+    2147483647,
+    -2147483648,
+])
+def test_integer_literal_return(integer, compile):
+    plugin = compile('''
+        public Test() {
+            return %d;
+        }
+    ''' % integer)
+    assert plugin.runtime.call_function_by_name('Test') == integer
+
+
+def test_float_literal_return(compile):
+    plugin = compile('''
+        public Test() {
+            return 12.0;
+        }
+    ''')
+    rval = plugin.runtime.call_function_by_name('Test')
+    assert rval == 12.0
+    assert isinstance(rval, float)
+
+
+def test_string_return(compile):
+    plugin = compile('''
+        String:Test() {
+            new String:s[] = "hiss";
+            return s;
+        }
+        public DontOptimizeOutTest() {
+            Test();
+        }
+    ''')
+    rval = plugin.runtime.call_function_by_name('Test')
+    assert rval == 'hiss'
 
 
 # @pytest.mark.xfail(reason='rvals from inner calls currently unsupported')
-def test_interpreter():
+def test_interpreter(compile):
     plugin = compile("""
         #include <sourcemod>
 
