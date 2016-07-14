@@ -1,7 +1,7 @@
-os:
-  - linux
-  - osx
 language: python
 python: 2.7
+before_install:
+  - sudo apt-get update
+  - sudo apt-get install -y libc6-i386 lib32stdc++6
 install: pip install -r test-requirements.txt
 script: py.test -v
