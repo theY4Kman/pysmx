@@ -132,6 +132,35 @@ class SourcePawnPlugin(object):
         dimcount = cf_uint16()      # Dimension count (for arrays)
         name = cf_uint32()          # Offset into debug nametable
 
+    class sp_fdbg_arraydim(NoAlignStruct):
+        """Occurs after an fdbg_symbol entry, for each dimension."""
+        tagid = cf_int16()          # Tag id
+        size = cf_uint32()          # Size of dimension
+
+    class sp_fdbg_ntvtab(NoAlignStruct):
+        """Header for the ".dbg.natives" section.
+
+        It is followed by a number of sp_fdbg_native_t entries.
+        """
+        num_entries = cf_uint32()   # Number of entries
+
+    class sp_fdbg_native(NoAlignStruct):
+        """An entry in the .dbg.natives section.
+
+        Each is followed by an sp_fdbg_ntvarg_t for each argument.
+        """
+        index = cf_uint32()         # Native index in the plugin.
+        name = cf_uint32()          # Offset into debug nametable.
+        tagid = cf_int16()          # Return tag.
+        nargs = cf_uint16()         # Number of formal arguments.
+
+    class sp_fdbg_ntvarg(NoAlignStruct):
+        """Each entry is followed by an sp_fdbg_arraydim_t for each dimcount."""
+        ident = cf_uint8()          # Variable type
+        tagid = cf_int16()          # Tag id
+        dimcount = cf_uint16()      # Dimension count (for arrays)
+        name = cf_uint32()          # Offset into debug nametable
+
 
     class StringtableName(object):
         @property
@@ -277,28 +306,42 @@ class SourcePawnPlugin(object):
             }
 
             def __init__(self, debug, addr, tagid, codestart, codeend, ident,
-                         vclass, dimcount, name):
+                         vclass, dimcount, name, arraydims):
                 self.debug = debug
 
-                self.addr = addr
-                self.tagid = tagid
-                self.codestart = codestart
-                self.codeend = codeend
-                self.ident = ident
-                self.vclass = vclass
-                self.dimcount = dimcount
+                self.addr = addr            # Address rel to DAT or stack frame
+                self.tagid = tagid          # Tag id
+                self.codestart = codestart  # Start scope validity in code
+                self.codeend = codeend      # End scope validity in code
+                self.ident = ident          # Variable type
+                self.vclass = vclass        # Scope class (local vs global)
+                self.dimcount = dimcount    # Dimension count (for arrays)
+                self.arraydims = arraydims
                 self._name = name
 
             @property
             def name(self):
-                debug_name = self.debug.stringtable.get(self._name)
-                global_name = self.debug.plugin.stringtable.get(self._name)
-                return debug_name or global_name
+                return self.debug.stringtable.get(self._name)
+
+            @property
+            def tag(self):
+                return self.debug.plugin.tags[self.tagid]
 
             def __str__(self):
-                fmt = 'DbgSymbol {name} (ident: {ident}, stringidx: {stringidx})'
+                tag = self.tag.name
+                name = self.name
+                suffix = ''
+                if self.ident == SP_SYM_FUNCTION:
+                    suffix = '()'
+                elif self.ident == SP_SYM_ARRAY:
+                    suffix = ''.join('[%d]' % d.size for d in self.arraydims)
+
+                fmt = '.dbg.symbol({tag}:{name}{suffix})'
+                return fmt.format(tag=tag, name=name, suffix=suffix)
+
+                fmt = 'DbgSymbol {name} ({ident}, stringidx: {stringidx})'
                 return fmt.format(
-                    name=('"%s"' % self.name) if self.name else '<unknown>',
+                    name=('"%s"' % self.name) if self.name else '<unnamed>',
                     ident=self.SYMBOL_TYPE_NAMES.get(self.ident, 'unknown'),
                     stringidx=self._name,
                 )
@@ -340,9 +383,9 @@ class SourcePawnPlugin(object):
         def _line(self, addr, line):
             return self.DbgLine(self, addr, line)
         def _symbol(self, addr, tagid, codestart, codeend, ident, vclass,
-                    dimcount, name):
+                    dimcount, name, arraydims=()):
             return self.DbgSymbol(self, addr, tagid, codestart, codeend,
-                                  ident, vclass, dimcount, name)
+                                  ident, vclass, dimcount, name, arraydims)
 
 
     def __init__(self, filelike=None):
@@ -457,7 +500,7 @@ class SourcePawnPlugin(object):
                 buffer(self.base, _hdr_size, _total_sectsize)[:],
                 _total_sectsize)
 
-        sections = {}
+        sections = OrderedDict()
         for sect in _sections[:hdr.sections]:
             name = c_char_p(buffer(self.base,
                                    self.stringtab + sect.nameoffs)[:]).value
@@ -507,8 +550,11 @@ class SourcePawnPlugin(object):
             memmove(addressof(tags),
                     buffer(self.base, sect.dataoffs, sect.size)[:], sect.size)
 
-            for tag in tags[:self.num_tags]:
-                self.tags[tag.tag_id] = self._tag(tag.tag_id, tag.name)
+            for index, tag in enumerate(tags[:self.num_tags]):
+                # XXX: why do String, Float, etc have ridiculously high tag_ids?
+                # XXX: Tag "String" (id: 1073741828)
+                # XXX: Tag "Float" (id: 1073741829)
+                self.tags[index] = self._tag(tag.tag_id, tag.name)
 
         # Functions defined as public
         if '.publics' in sections:
@@ -578,13 +624,31 @@ class SourcePawnPlugin(object):
 
         if '.dbg.info' in sections:
             inf = self.sp_fdbg_info(self.base, sections['.dbg.info'].dataoffs)
-
-            self.debug.files_num = inf.num_files
-            self.debug.lines_num = inf.num_lines
-            self.debug.syms_num = inf.num_syms
+            self.debug.info = inf
 
         if '.dbg.natives' in sections:
-            self.debug.unpacked = False
+            sect = sections['.dbg.natives']
+            self.debug.natives = OrderedDict()
+
+            a_offset = [0]
+            def read(klass):
+                inst = klass(self.base, sect.dataoffs + a_offset[0])
+                a_offset[0] += sizeof(klass)
+                return inst
+
+            ntvtab = read(self.sp_fdbg_ntvtab)
+            num_natives = ntvtab.num_entries
+
+            for i in xrange(num_natives):
+                native = read(self.sp_fdbg_native)
+                ntvargs = []
+                for _ in xrange(native.nargs):
+                    ntvarg = read(self.sp_fdbg_ntvarg)
+                    ntvarg.dims = [read(self.sp_fdbg_arraydim)
+                                   for _ in xrange(ntvarg.dimcount)]
+                    ntvargs.append(ntvarg)
+                native.args = ntvargs
+                self.debug.natives[native.index] = native
 
         if '.dbg.files' in sections:
             sect = sections['.dbg.files']
@@ -617,19 +681,25 @@ class SourcePawnPlugin(object):
         if '.dbg.symbols' in sections:
             sect = sections['.dbg.symbols']
 
-            num_dbg_symbols = sect.size / sizeof(self.sp_fdbg_symbol)
-            symbols = (self.sp_fdbg_symbol * num_dbg_symbols)()
-            memmove(addressof(symbols),
-                    buffer(self.base, sect.dataoffs, sect.size)[:],
-                    sizeof(symbols))
-
             self.debug.symbols = []
-            for sym in symbols[:num_dbg_symbols]:
-                self.debug.symbols.append(
-                    self.debug._symbol(sym.addr, sym.tagid, sym.codestart,
-                                       sym.codeend, sym.ident, sym.vclass,
-                                       sym.dimcount, sym.name)
-                )
+            self.debug.symbols_by_addr = OrderedDict()
+            i = 0
+            while i < sect.size:
+                sym = self.sp_fdbg_symbol(self.base, sect.dataoffs + i)
+                i += sizeof(self.sp_fdbg_symbol)
+
+                symbol = self.debug._symbol(sym.addr, sym.tagid, sym.codestart,
+                                            sym.codeend, sym.ident, sym.vclass,
+                                            sym.dimcount, sym.name)
+
+                symbol.arraydims = []
+                for _ in xrange(sym.dimcount):
+                    dim = self.sp_fdbg_arraydim(self.base, sect.dataoffs + i)
+                    i += sizeof(self.sp_fdbg_arraydim)
+                    symbol.arraydims.append(dim)
+
+                self.debug.symbols.append(symbol)
+                self.debug.symbols_by_addr[symbol.addr] = symbol
 
         if self.flags & SP_FLAG_DEBUG and (self.debug.files is None or
                                            self.debug.lines is None or

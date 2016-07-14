@@ -482,6 +482,13 @@ class SourcePawnAbstractMachine(object):
             if self.print_verification:
                 print '%d verification fault%s' % (faults, "s"[faults==1:])
 
+        # Attempt to determine the tag of the function's return value
+        func = self.plugin.debug.symbols_by_addr.get(code_offs)
+        if func:
+            rv_tag = func.tag
+            if rv_tag:
+                rval = decode_tag(rv_tag.name, rval)
+
         return rval
 
     def _step(self):

@@ -1,6 +1,5 @@
 # SourcePawn defines
-from ctypes import c_uint32, c_int32
-
+import ctypes
 
 SPFILE_MAGIC = 0x53504646
 
@@ -28,5 +27,12 @@ SP_DBG_SCOPE_GLOBAL = 0
 SP_DBG_SCOPE_LOCAL  = 1
 SP_DBG_SCOPE_STATIC = 2
 
-ucell = c_uint32
-cell = c_int32
+ucell = ctypes.c_uint32
+cell = ctypes.c_int32
+
+def decode_tag(tag_name, value):
+    if tag_name == 'Float':
+        cfloat = ctypes.cast((cell * 1)(value), ctypes.POINTER(ctypes.c_float)).contents
+        return cfloat.value
+    else:
+        return value

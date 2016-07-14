@@ -43,7 +43,7 @@ def test_integer_literal_return(integer, compile):
 
 def test_float_literal_return(compile):
     plugin = compile('''
-        public Test() {
+        public Float:Test() {
             return 12.0;
         }
     ''')

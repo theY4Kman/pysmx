@@ -97,7 +97,7 @@ class StructField(object):
 field = StructField
 
 class StructBase(type(ctypes.Structure)):
-    def __new__(cls, name, bases, attrs):
+    def __new__(cls, cls_name, bases, attrs):
         fields = []
         order = {}
         module = attrs.pop('__module__')
@@ -120,7 +120,7 @@ class StructBase(type(ctypes.Structure)):
             new_attrs['_fields_'] = fields
 
         super_new = super(StructBase, cls).__new__
-        new_class = super_new(cls, name, bases, new_attrs)
+        new_class = super_new(cls, cls_name, bases, new_attrs)
 
         return new_class
 
@@ -144,6 +144,13 @@ class Struct(ctypes.Structure):
     def pack_into(self, buffer):
         fit = min(len(buffer), ctypes.sizeof(self))
         ctypes.memmove(ctypes.addressof(self), buffer[:], fit)
+
+    def __repr__(self):
+        return '{klass}({fields})'.format(
+            klass=self.__class__.__name__,
+            fields=', '.join('%s=%r' % (attr, getattr(self, attr))
+                             for attr,_ in self._fields_)
+        )
 
 
 class NoAlignStruct(Struct):
