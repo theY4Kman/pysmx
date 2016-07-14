@@ -487,7 +487,17 @@ class SourcePawnAbstractMachine(object):
         if func:
             rv_tag = func.tag
             if rv_tag:
-                rval = decode_tag(rv_tag.name, rval)
+                tag_name = func.tag.name
+                if tag_name == 'Float':
+                    rval = self._sp_ctof(cell(rval))
+                elif tag_name == 'bool':
+                    rval = bool(rval)
+                elif tag_name == 'String':
+                    op, args, _, _ = self._executed[-2]
+                    assert op == 'stack'
+                    assert len(args) == 1
+                    size = int(args[0], 0x10)
+                    rval = (c_char * size).from_buffer_copy(buffer(self.heap, rval, size)).value
 
         return rval
 
