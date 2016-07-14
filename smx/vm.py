@@ -590,6 +590,7 @@ class SourcePawnPluginRuntime(object):
 
         self.amx._dummy_frame()
         func = self.get_function_by_name(main)
-        func()
+        rval = func()
 
         self.amx.smsys.timers.poll_for_timers()
+        return rval

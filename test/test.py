@@ -16,14 +16,12 @@ def compile():
 @pytest.mark.parametrize('value', [True, False])
 def test_bool_literal_return(value, compile):
     plugin = compile('''
-        public Test() {
+        public bool:Test() {
             return %s;
         }
     ''' % ('true' if value else 'false'))
     rval = plugin.runtime.call_function_by_name('Test')
-    # TODO
-    # assert rval is value
-    assert rval == value
+    assert rval is value
 
 
 @pytest.mark.parametrize('integer', [

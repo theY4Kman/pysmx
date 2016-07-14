@@ -34,5 +34,7 @@ def decode_tag(tag_name, value):
     if tag_name == 'Float':
         cfloat = ctypes.cast((cell * 1)(value), ctypes.POINTER(ctypes.c_float)).contents
         return cfloat.value
+    elif tag_name == 'bool':
+        return bool(value)
     else:
         return value
