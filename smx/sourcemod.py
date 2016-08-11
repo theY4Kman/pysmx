@@ -283,6 +283,23 @@ def native(f):
     f.is_native = True
     return f
 
+
+class ConVar(object):
+    def __init__(self, name, default_value, description='', flags=0, min=None, max=None):
+        self.name = name
+        self.value = self.default_value = default_value
+        self.description = description
+        self.flags = flags
+        self.min = min
+        self.max = max
+
+    def __str__(self):
+        return self.value
+
+    def __repr__(self):
+        return '<ConVar %s %r>' % (self.name, self.value)
+
+
 class SourceModNatives(object):
     def __init__(self, sys):
         """
@@ -335,10 +352,44 @@ class SourceModNatives(object):
 
         return self.sys.timers.create_timer(interval, func, data, flags)
 
+    @native
+    def CreateConVar(self, params):
+        name = self.amx._local_to_string(params[1])
+        default_value = self.amx._local_to_string(params[2])
+        description = self.amx._local_to_string(params[3])
+        flags = params[4]
+        has_min = bool(params[5])
+        min = sp_ctof(params[6]) if has_min else None
+        has_max = bool(params[7])
+        max = sp_ctof(params[8]) if has_max else None
+
+        cvar = ConVar(name, default_value, description, flags, min, max)
+        self.sys.convars[name] = cvar
+        return self.sys.handles.new_handle(cvar)
+
+    @native
+    def GetConVarInt(self, params):
+        handle = params[1]
+        cvar = self.sys.handles[handle]
+        return int(cvar.value)
 
 
 class SourceModHandles(object):
     """Emulates SourceMod's handles"""
+
+    def __init__(self, sys):
+        self.sys = sys
+        self._handle_counter = 0
+        self._handles = {}
+
+    def new_handle(self, obj):
+        self._handle_counter += 1
+        handle_id = self._handle_counter
+        self._handles[handle_id] = obj
+        return handle_id
+
+    def __getitem__(self, handle_id):
+        return self._handles[handle_id]
 
 
 class SourceModTimers(object):
@@ -397,10 +448,13 @@ class SourceModSystem(object):
 
         self.natives = SourceModNatives(self)
         self.timers = SourceModTimers(self)
+        self.handles = SourceModHandles(self)
 
         self.tickrate = 66
         self.interval_per_tick = 1.0 / self.tickrate
         self.last_tick = None
+
+        self.convars = {}
 
     def tick(self):
         self.last_tick = engine_time()

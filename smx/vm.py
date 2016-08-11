@@ -248,7 +248,7 @@ class SourcePawnAbstractMachine(object):
         params_ptr = cast(pointer(params), POINTER(c_void_p))
         params_ptr.contents.value += paramoffs
 
-        pyfunc(params)
+        return pyfunc(params)
 
     def _pubcall(self, func_id):
         if not func_id & 1:

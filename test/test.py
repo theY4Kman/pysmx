@@ -118,3 +118,19 @@ def test_interpreter(compile):
 
     # But this doesn't
     # assert plugin.runtime.call_function_by_name('ReturnTwentyThree') == 23
+
+
+def test_convars(compile):
+    plugin = compile('''
+        new Handle:g_cvar = INVALID_HANDLE;
+        public TestCreateConVar() {
+            g_cvar = CreateConVar("pysmx_num", "350", "description");
+        }
+        public TestGetConVarInt() {
+            return GetConVarInt(g_cvar);
+        }
+    ''')
+
+    plugin.runtime.call_function_by_name('TestCreateConVar')
+    value = plugin.runtime.call_function_by_name('TestGetConVarInt')
+    assert value == 350
