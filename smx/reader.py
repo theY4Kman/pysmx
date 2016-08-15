@@ -494,11 +494,8 @@ class SourcePawnPlugin(object):
 
         self.base = buffer(base)
 
-        _total_sectsize = sizeof(self.sp_file_section) * hdr.sections
-        _sections = (self.sp_file_section * hdr.sections)()
-        memmove(addressof(_sections),
-                buffer(self.base, _hdr_size, _total_sectsize)[:],
-                _total_sectsize)
+        _sections_type = (self.sp_file_section * hdr.sections)
+        _sections = _sections_type.from_buffer_copy(self.base, _hdr_size)
 
         sections = OrderedDict()
         for sect in _sections[:hdr.sections]:
