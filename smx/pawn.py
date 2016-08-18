@@ -5,41 +5,12 @@ from smx.exceptions import (
     SourcePawnOpcodeNotGenerated,
     SourcePawnOpcodeDeprecated,
     SourcePawnOpcodeNotSupported,
-    Done)
+    Done,
+)
 from smx.struct import cast_value
 
 
 class SMXInstructions(object):
-    def align_pri(self, amx): raise SourcePawnOpcodeNotGenerated
-    def align_alt(self, amx): raise SourcePawnOpcodeNotGenerated
-    def lctrl(self, amx): raise SourcePawnOpcodeNotGenerated
-    def sctrl(self, amx): raise SourcePawnOpcodeNotGenerated
-    def push_r(self, amx): raise SourcePawnOpcodeDeprecated
-    def ret(self, amx): raise SourcePawnOpcodeNotGenerated
-    def call_pri(self, amx): raise SourcePawnOpcodeNotGenerated
-    def jrel(self, amx): raise SourcePawnOpcodeNotGenerated
-    def jless(self, amx): raise SourcePawnOpcodeNotGenerated
-    def jleq(self, amx): raise SourcePawnOpcodeNotGenerated
-    def jgrtr(self, amx): raise SourcePawnOpcodeNotGenerated
-    def jgeq(self, amx): raise SourcePawnOpcodeNotGenerated
-    def umul(self, amx): raise SourcePawnOpcodeNotGenerated
-    def udiv(self, amx): raise SourcePawnOpcodeNotGenerated
-    def udiv_alt(self, amx): raise SourcePawnOpcodeNotGenerated
-    def less(self, amx): raise SourcePawnOpcodeNotGenerated
-    def leq(self, amx): raise SourcePawnOpcodeNotGenerated
-    def grtr(self, amx): raise SourcePawnOpcodeNotGenerated
-    def geq(self, amx): raise SourcePawnOpcodeNotGenerated
-    def cmps(self, amx): raise SourcePawnOpcodeNotGenerated
-    def sysreq_pri(self, amx): raise SourcePawnOpcodeNotGenerated
-    def file(self, amx): raise SourcePawnOpcodeDeprecated
-    def line(self, amx): raise SourcePawnOpcodeDeprecated
-    def symbol(self, amx): raise SourcePawnOpcodeDeprecated
-    def srange(self, amx): raise SourcePawnOpcodeDeprecated
-    def jump_pri(self, amx): raise SourcePawnOpcodeNotGenerated
-    def symtag(self, amx): raise SourcePawnOpcodeDeprecated
-    def sysreq_d(self, amx): raise SourcePawnOpcodeNotSupported
-    def sysreq_nd(self, amx): raise SourcePawnOpcodeNotSupported
-
     def load_pri(self, amx):
         offs = amx._getparam()
         amx.PRI = amx._getdatacell(offs)
@@ -86,7 +57,8 @@ class SMXInstructions(object):
         num_params = amx._getparam()
         amx._push(num_params)
         amx.PRI = amx._nativecall(native_index, amx.STK)
-        amx.STK += (num_params + 1) * sizeof(cell)  # +1 to remove number of params
+        amx.STK += (num_params + 1) * sizeof(
+            cell)  # +1 to remove number of params
         # keep our Python stack in check
         amx._filter_stack(amx.STK)
 
@@ -95,7 +67,6 @@ class SMXInstructions(object):
         amx._nativecall(native_index, amx.STK)
         # keep our Python stack in check
         amx._filter_stack(amx.STK)
-
 
     def call(self, amx):
         amx._push(amx.CIP + sizeof(cell))
@@ -122,6 +93,7 @@ class SMXInstructions(object):
 
     def zero_pri(self, amx):
         amx.PRI = 0
+
     def zero_alt(self, amx):
         amx.ALT = 0
 
@@ -148,12 +120,14 @@ class SMXInstructions(object):
 
     def const_pri(self, amx):
         amx.PRI = amx._getparam()
+
     def const_alt(self, amx):
         amx.ALT = amx._getparam()
 
     def addr_pri(self, amx):
         amx.PRI = amx._getparam()
         amx.PRI += amx.FRM
+
     def addr_alt(self, amx):
         amx.ALT = amx._getparam()
         amx.ALT += amx.FRM
@@ -161,6 +135,7 @@ class SMXInstructions(object):
     def stor_pri(self, amx):
         offs = amx._getparam()
         amx._writeheap(offs, cell(amx.PRI))
+
     def stor_alt(self, amx):
         offs = amx._getparam()
         amx._writeheap(offs, cell(amx.ALT))
@@ -172,6 +147,7 @@ class SMXInstructions(object):
         amx._writeheap(addr, val)
         # Keep our Python stack list updated
         amx._stack_set(addr, val)
+
     def stor_s_alt(self, amx):
         offs = amx._getparam_p()
         addr = amx.FRM + offs
@@ -184,6 +160,7 @@ class SMXInstructions(object):
         offs = amx._getparam()
         offs = amx._getdatacell(offs)
         amx._writeheap(offs, cell(amx.PRI))
+
     def sref_alt(self, amx):
         offs = amx._getparam()
         offs = amx._getdatacell(offs)
@@ -193,6 +170,7 @@ class SMXInstructions(object):
         offs = amx._getparam()
         offs = amx._getdatacell(amx.FRM + offs)
         amx._writeheap(offs, cell(amx.PRI))
+
     def sref_s_alt(self, amx):
         offs = amx._getparam()
         offs = amx._getdatacell(amx.FRM + offs)
@@ -232,18 +210,22 @@ class SMXInstructions(object):
 
     def move_pri(self, amx):
         amx.PRI = amx.ALT
+
     def move_alt(self, amx):
         amx.ALT = amx.PRI
+
     def xchg(self, amx):
-        amx.ALT ,amx.PRI = amx.PRI ,amx.ALT
+        amx.ALT, amx.PRI = amx.PRI, amx.ALT
 
     def push_pri(self, amx):
         amx._push(amx.PRI)
+
     def push_alt(self, amx):
         amx._push(amx.ALT)
 
     def pop_pri(self, amx):
         amx.PRI = amx._pop()
+
     def pop_alt(self, amx):
         amx.ALT = amx._pop()
 
@@ -260,7 +242,6 @@ class SMXInstructions(object):
         amx.ALT = amx.HEA
         amx.HEA += offs
         # TODO: CHKMARGIN CHKHEAP
-
 
     # Jumps
     def jump(self, amx):
@@ -314,7 +295,6 @@ class SMXInstructions(object):
         else:
             amx._skipparam(label=True)
 
-
     # Shifts
     def shl(self, amx):
         amx.PRI <<= amx.ALT
@@ -342,14 +322,13 @@ class SMXInstructions(object):
         offs = amx._getparam()
         amx.ALT >>= offs
 
-
     # Multiplication
     def smul(self, amx):
         amx.PRI *= amx.ALT
+
     def smul_c(self, amx):
         offs = amx._getparam()
         amx.PRI *= offs
-
 
     # Division
     def sdiv(self, amx):
@@ -376,33 +355,37 @@ class SMXInstructions(object):
             amx.ALT -= 1
             amx.PRI += offs
 
-
     # Bitwise operators
     def dand(self, amx):
         amx.PRI &= amx.ALT
+
     def dor(self, amx):
         amx.PRI |= amx.ALT
+
     def xor(self, amx):
         amx.PRI ^= amx.ALT
+
     def dnot(self, amx):
         amx.PRI = not amx.PRI
+
     def neg(self, amx):
         amx.PRI = -amx.PRI
+
     def invert(self, amx):
         amx.PRI = ~amx.PRI
-
 
     # Adding
     def add(self, amx):
         amx.PRI += amx.ALT
+
     def add_c(self, amx):
         value = amx._getparam()
         amx.PRI += value
 
-
     # Subtracting
     def sub(self, amx):
         amx.PRI = amx.PRI - amx.ALT
+
     def sub_alt(self, amx):
         amx.PRI = amx.ALT - amx.PRI
 
@@ -413,36 +396,42 @@ class SMXInstructions(object):
     def sign_pri(self, amx):
         """Keeps lower 8 bits, sign extending"""
         amx.PRI = (amx.PRI << 24) >> 24
+
     def sign_alt(self, amx):
         """Keeps lower 8 bits, sign extending"""
         amx.PRI = (amx.PRI << 24) >> 24
 
-
     # Comparisons
     def eq(self, amx):
         amx.PRI = 1 if amx.PRI == amx.ALT else 0
+
     def neq(self, amx):
         amx.PRI = 1 if amx.PRI != amx.ALT else 0
+
     def sless(self, amx):
         amx.PRI = 1 if amx.PRI < amx.ALT else 0
+
     def sleq(self, amx):
         amx.PRI = 1 if amx.PRI <= amx.ALT else 0
+
     def sgrtr(self, amx):
         amx.PRI = 1 if amx.PRI > amx.ALT else 0
+
     def sgeq(self, amx):
         amx.PRI = 1 if amx.PRI >= amx.ALT else 0
 
     def eq_c_pri(self, amx):
         val = amx._getparam()
         amx.PRI = 1 if amx.PRI == val else 0
+
     def eq_c_alt(self, amx):
         val = amx._getparam()
         amx.PRI = 1 if amx.ALT == val else 0
 
-
     # Incrementation
     def inc_pri(self, amx):
         amx.PRI += 1
+
     def inc_alt(self, amx):
         amx.ALT += 1
 
@@ -463,10 +452,10 @@ class SMXInstructions(object):
         val = amx._getheapcell(offs)
         amx._writeheap(offs, cell(val + 1))
 
-
     # Decrementation
     def dec_pri(self, amx):
         amx.PRI -= 1
+
     def dec_alt(self, amx):
         amx.ALT -= 1
 
@@ -487,12 +476,10 @@ class SMXInstructions(object):
         val = amx._getheapcell(offs)
         amx._writeheap(offs, cell(val - 1))
 
-
     def movs(self, amx):
         # TODO: verify addresses
         bytes = amx._getparam()
-        memmove(addressof(amx.heap) + amx.ALT,
-                addressof(amx.heap) + amx.PRI, bytes)
+        amx.heap[amx.ALT:amx.ALT+bytes] = amx.heap[amx.PRI:amx.PRI+bytes]
 
     def fill(self, amx):
         # TODO: verify addresses
@@ -514,12 +501,15 @@ class SMXInstructions(object):
 
     # switch()
     def switch_(self, amx):
-        cptr = amx._jumprel(amx.CIP) + sizeof \
-            (cell)  # +1 to skip the CASETBL opcode
+        # +1 to skip the CASETBL opcode
+        cptr = amx._jumprel(amx.CIP) + sizeof (cell)
+
         # TODO: assert amx.CIP == OP_CASETBL
-        amx.CIP = amx._jumprel \
-            (cptr + sizeof(cell))  # preset to none-matched case
-        i = amx._readcodecell(cptr)                  # number of records in the case table
+        # preset to none-matched case
+        amx.CIP = amx._jumprel(cptr + sizeof(cell))
+
+        # number of records in the case table
+        i = amx._readcodecell(cptr)
 
         # Check each case
         while i > 0 and amx._getheapcell(cptr) != amx.PRI:
@@ -527,11 +517,10 @@ class SMXInstructions(object):
             cptr += 2
 
         if i > 0:
-            amx.CIP = amx._jumprel(cptr + 1  )# case found
+            amx.CIP = amx._jumprel(cptr + 1)  # case found
 
     def casetbl(self, amx):
         pass
-
 
     def swap_pri(self, amx):
         offs = amx._getheapcell(amx.STK)
@@ -543,7 +532,6 @@ class SMXInstructions(object):
         amx._writeheap(amx.STK, amx.ALT)
         amx.ALT = offs
 
-
     def _macro_push_n(self, amx, n):
         for x in xrange(n):
             offs = amx._getparam()
@@ -552,15 +540,18 @@ class SMXInstructions(object):
 
     def push(self, amx):
         self._macro_push_n(amx, 1)
+
     def push2(self, amx):
         self._macro_push_n(amx, 2)
+
     def push3(self, amx):
         self._macro_push_n(amx, 3)
+
     def push4(self, amx):
         self._macro_push_n(amx, 4)
+
     def push5(self, amx):
         self._macro_push_n(amx, 5)
-
 
     def _macro_push_n_c(self, amx, n):
         for x in xrange(n):
@@ -568,15 +559,18 @@ class SMXInstructions(object):
 
     def push_c(self, amx):
         self._macro_push_n_c(amx, 1)
+
     def push2_c(self, amx):
         self._macro_push_n_c(amx, 2)
+
     def push3_c(self, amx):
         self._macro_push_n_c(amx, 3)
+
     def push4_c(self, amx):
         self._macro_push_n_c(amx, 4)
+
     def push5_c(self, amx):
         self._macro_push_n_c(amx, 5)
-
 
     def _macro_push_n_s(self, amx, n):
         for x in xrange(n):
@@ -586,15 +580,18 @@ class SMXInstructions(object):
 
     def push_s(self, amx):
         self._macro_push_n_s(amx, 1)
+
     def push2_s(self, amx):
         self._macro_push_n_s(amx, 2)
+
     def push3_s(self, amx):
         self._macro_push_n_s(amx, 3)
+
     def push4_s(self, amx):
         self._macro_push_n_s(amx, 4)
+
     def push5_s(self, amx):
         self._macro_push_n_s(amx, 5)
-
 
     def _macro_push_n_adr(self, amx, n):
         for x in xrange(n):
@@ -603,15 +600,18 @@ class SMXInstructions(object):
 
     def push_adr(self, amx):
         self._macro_push_n_adr(amx, 1)
+
     def push2_adr(self, amx):
         self._macro_push_n_adr(amx, 2)
+
     def push3_adr(self, amx):
         self._macro_push_n_adr(amx, 3)
+
     def push4_adr(self, amx):
         self._macro_push_n_adr(amx, 4)
+
     def push5_adr(self, amx):
         self._macro_push_n_adr(amx, 5)
-
 
     def load_both(self, amx):
         offs = amx._getparam()
@@ -635,21 +635,140 @@ class SMXInstructions(object):
         val = amx._getparam()
         amx._writeheap(amx.FRM + offs, cell(val))
 
-    def tracker_push_c(self, amx): raise NotImplementedError
-    def tracker_pop_setheap(self, amx): raise NotImplementedError
-    def genarray(self, amx): raise NotImplementedError
-    def genarray_z(self, amx): raise NotImplementedError
-    def stradjust_pri(self, amx): raise NotImplementedError
-    def stackadjust(self, amx): raise NotImplementedError
+    def align_pri(self, amx):
+        raise SourcePawnOpcodeNotGenerated
 
-    def fabs(self, amx): raise NotImplementedError
-    def float_(self, amx): raise NotImplementedError
-    def floatadd(self, amx): raise NotImplementedError
-    def floatsub(self, amx): raise NotImplementedError
-    def floatmul(self, amx): raise NotImplementedError
-    def floatdiv(self, amx): raise NotImplementedError
-    def rnd_to_nearest(self, amx): raise NotImplementedError
-    def rnd_to_floor(self, amx): raise NotImplementedError
-    def rnd_to_ceil(self, amx): raise NotImplementedError
-    def rnd_to_zero(self, amx): raise NotImplementedError
-    def floatcmp(self, amx): raise NotImplementedError
+    def align_alt(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def lctrl(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def sctrl(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def push_r(self, amx):
+        raise SourcePawnOpcodeDeprecated
+
+    def ret(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def call_pri(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def jrel(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def jless(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def jleq(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def jgrtr(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def jgeq(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def umul(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def udiv(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def udiv_alt(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def less(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def leq(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def grtr(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def geq(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def cmps(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def sysreq_pri(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def file(self, amx):
+        raise SourcePawnOpcodeDeprecated
+
+    def line(self, amx):
+        raise SourcePawnOpcodeDeprecated
+
+    def symbol(self, amx):
+        raise SourcePawnOpcodeDeprecated
+
+    def srange(self, amx):
+        raise SourcePawnOpcodeDeprecated
+
+    def jump_pri(self, amx):
+        raise SourcePawnOpcodeNotGenerated
+
+    def symtag(self, amx):
+        raise SourcePawnOpcodeDeprecated
+
+    def sysreq_d(self, amx):
+        raise SourcePawnOpcodeNotSupported
+
+    def sysreq_nd(self, amx):
+        raise SourcePawnOpcodeNotSupported
+
+    def tracker_push_c(self, amx):
+        raise NotImplementedError
+
+    def tracker_pop_setheap(self, amx):
+        raise NotImplementedError
+
+    def genarray(self, amx):
+        raise NotImplementedError
+
+    def genarray_z(self, amx):
+        raise NotImplementedError
+
+    def stradjust_pri(self, amx):
+        raise NotImplementedError
+
+    def stackadjust(self, amx):
+        raise NotImplementedError
+
+    def fabs(self, amx):
+        raise NotImplementedError
+
+    def float_(self, amx):
+        raise NotImplementedError
+
+    def floatadd(self, amx):
+        raise NotImplementedError
+
+    def floatsub(self, amx):
+        raise NotImplementedError
+
+    def floatmul(self, amx):
+        raise NotImplementedError
+
+    def floatdiv(self, amx):
+        raise NotImplementedError
+
+    def rnd_to_nearest(self, amx):
+        raise NotImplementedError
+
+    def rnd_to_floor(self, amx):
+        raise NotImplementedError
+
+    def rnd_to_ceil(self, amx):
+        raise NotImplementedError
+
+    def rnd_to_zero(self, amx):
+        raise NotImplementedError
+
+    def floatcmp(self, amx):
+        raise NotImplementedError

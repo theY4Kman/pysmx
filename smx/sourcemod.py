@@ -29,6 +29,8 @@ def _check_fmt_args(x, arg, args):
 
 def has_flag(v, flag):
     return (v & flag) == flag
+
+
 def has_flags(v, flags):
     # TODO: use generator to allow for early escape (profile first)
     return all(map(lambda f: has_flag(v, f), flags))
@@ -60,12 +62,15 @@ def render_int(val, flags, width):
         s = s.replace(' ', '0')
     return s
 
+
 def render_string(val, flags, width, precision):
     return render_fmt('s', flags, width, precision) % val
+
 
 def render_bin(val, flags, width):
     s = bin(val)[2:]
     return render_string(s, flags, width, None)
+
 
 def render_hex(val, flags, width):
     s = render_fmt('x', flags, width) % val
@@ -73,6 +78,7 @@ def render_hex(val, flags, width):
     if has_flags(flags, (FMT_LADJUST,FMT_ZEROPAD)):
         s = s.replace(' ', '0')
     return s
+
 
 def render_float(val, flags, width, precision):
     # TODO: SourceMod does not round the last digit, we need to match this
@@ -107,8 +113,10 @@ def formatfunc(matches, eats=0, incr=True):
         return func
     return inner
 
+
 def isformatfunc(f):
     return callable(f) and hasattr(f, 'formatfunc') and f.formatfunc
+
 
 class PrintfFormatter(object):
     def __init__(self):

@@ -414,21 +414,7 @@ class SourcePawnAbstractMachine(object):
         elif name in self._offs_to_func:
             return self._offs_to_func[name]
 
-
-    def _dummy_frame(self):
-        """
-        When OnPluginStart retns, it expects a frame already setup, so it can
-        retn to the program exit point.
-        """
-        # XXX ##########################################################################
-        # self.FRM = 0
-        # self.STK = self.STP
-        # self._push(0)
-        # XXX ##########################################################################
-
-
     def _execute(self, code_offs, verify_offs=True):
-        orig_frm = self.FRM
         rval = None
 
         if not self.initialized:
@@ -598,7 +584,6 @@ class SourcePawnPluginRuntime(object):
         self.amx.init()
         self.amx.smsys.tick()
 
-        self.amx._dummy_frame()
         func = self.get_function_by_name(main)
         rval = func()
 
