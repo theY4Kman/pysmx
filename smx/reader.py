@@ -151,9 +151,16 @@ class Tag(StringtableName):
         return 'Tag "%s" (id: %d)' % (self.name, self.tagid)
 
 
-class DbgFile(object):
-    def __init__(self, debug, addr, name):
+class _DbgChild(object):
+    """A shathingermabob that does stuff with the PluginDebug class"""
+
+    def __init__(self, debug):
         self.debug = debug
+
+
+class DbgFile(_DbgChild):
+    def __init__(self, debug, addr, name):
+        super(DbgFile, self).__init__(debug)
         self.addr = addr
         self._name = name
 
@@ -165,9 +172,9 @@ class DbgFile(object):
         return 'DbgFile "%s" (addr: %d)' % (self.name, self.addr)
 
 
-class DbgLine(object):
+class DbgLine(_DbgChild):
     def __init__(self, debug, addr, line):
-        self.debug = debug
+        super(DbgLine, self).__init__(debug)
         self.addr = addr
         self.line = line
 
@@ -175,7 +182,7 @@ class DbgLine(object):
         return 'DbgLine #%d (addr: %d)' % (self.line, self.addr)
 
 
-class DbgSymbol(object):
+class DbgSymbol(_DbgChild):
     SYMBOL_TYPE_NAMES = {
         SP_SYM_VARIABLE: 'variable',
         SP_SYM_REFERENCE: 'byref variable',
@@ -187,7 +194,7 @@ class DbgSymbol(object):
 
     def __init__(self, debug, addr, tagid, codestart, codeend, ident,
                  vclass, dimcount, name, arraydims):
-        self.debug = debug
+        super(DbgSymbol, self).__init__(debug)
 
         self.addr = addr  # Address rel to DAT or stack frame
         self.tagid = tagid  # Tag id
