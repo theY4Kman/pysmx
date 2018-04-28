@@ -1,4 +1,8 @@
-from ctypes import sizeof, c_uint8, c_uint16, c_uint32, memmove, addressof
+from __future__ import division
+
+from ctypes import sizeof, c_uint8, c_uint16, c_uint32
+
+from six.moves import xrange
 
 from smx.definitions import cell, ucell
 from smx.exceptions import (
@@ -479,7 +483,7 @@ class SMXInstructions(object):
     def movs(self, amx):
         # TODO: verify addresses
         bytes = amx._getparam()
-        amx.heap[amx.ALT:amx.ALT+bytes] = amx.heap[amx.PRI:amx.PRI+bytes]
+        amx.heap[amx.ALT:][:bytes] = amx.heap[amx.PRI:][:bytes]
 
     def fill(self, amx):
         # TODO: verify addresses

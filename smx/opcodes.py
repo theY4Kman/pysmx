@@ -1,4 +1,5 @@
 # Defines all the SourcePawn opcodes and provides helpers
+from __future__ import division
 
 __all__ = ['sp_opcodes_list', 'opcodes']
 

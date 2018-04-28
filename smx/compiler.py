@@ -1,15 +1,14 @@
+from __future__ import division
+
 import os
 import subprocess
 import sys
 from subprocess import check_call
 from tempfile import NamedTemporaryFile
 
-from smx import SourcePawnPlugin
+import six
 
-try:
-    from cStringIO import StringIO
-except ImportError:
-    from StringIO import StringIO
+from smx import SourcePawnPlugin
 
 
 PKG_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -35,6 +34,10 @@ def _get_compiler_path():
 
 def compile_to_string(code, assemble=False, include_dir=INCLUDE_DIR,
                       extra_args=''):
+    if isinstance(code, six.text_type):
+        # NOTE: all source code is assumed to be UTF-8
+        code = six.binary_type(code, 'utf-8')
+
     fp = NamedTemporaryFile(prefix='tmp_plugin', suffix='.sp', delete=False)
     fp.write(code)
     fp.flush()
@@ -59,7 +62,7 @@ def compile_to_string(code, assemble=False, include_dir=INCLUDE_DIR,
 
         check_call(args, stdout=subprocess.PIPE)
 
-        with open(out.name, 'rb') as compiled:
+        with open(out.name, 'r' if assemble else 'rb') as compiled:
             return compiled.read()
     finally:
         os.unlink(fp.name)
@@ -69,7 +72,7 @@ def compile_to_string(code, assemble=False, include_dir=INCLUDE_DIR,
 def compile(code, **options):
     """Compile SourcePawn code to a pysmx plugin"""
     smx = compile_to_string(code, **options)
-    fp = StringIO(smx)
+    fp = six.BytesIO(smx)
     plugin = SourcePawnPlugin(fp)
 
     asm = compile_to_string(code, assemble=True, **options)

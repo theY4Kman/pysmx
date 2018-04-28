@@ -1,6 +1,6 @@
 from __future__ import absolute_import
 
-import string
+import logging
 import struct
 import sys
 from ctypes import *
@@ -15,6 +15,8 @@ from smx.exceptions import (
 from smx.opcodes import opcodes
 from smx.pawn import SMXInstructions
 from smx.sourcemod import SourceModSystem
+
+logger = logging.getLogger(__name__)
 
 
 def list_pop(lst, index=-1, default=None):
@@ -89,8 +91,7 @@ class SourcePawnAbstractMachine(object):
         self.COD = self.plugin.pcode.pcode
         self.DAT = self.plugin.data
 
-        self.code = buffer(self.plugin.base, self.COD,
-                           self.plugin.pcode.size)
+        self.code = self.plugin.base[self.COD:][:self.plugin.pcode.size]
         self.heap = (c_byte * (self.plugin.memsize - self.plugin.datasize))()
 
         self.STP = len(self.heap)
@@ -133,7 +134,7 @@ class SourcePawnAbstractMachine(object):
 
     def _getdatacell(self, offset):
         addr = self.plugin.data + offset
-        return struct.unpack('<l', self.plugin.base[addr:addr+sizeof(cell)])[0]
+        return struct.unpack('<l', self.plugin.base[addr:][:sizeof(cell)])[0]
 
     def _getheapcell(self, offset):
         heap = cast(self.heap, POINTER(cell))
@@ -206,7 +207,7 @@ class SourcePawnAbstractMachine(object):
         return v
 
     def _filter_stack(self, new_stk):
-        self._stack = filter(lambda o: o[0] >= new_stk, self._stack)
+        self._stack = [(addr, value) for addr, value in self._stack if addr >= new_stk]
 
     def _stack_set(self, set_addr, set_val):
         """
@@ -234,7 +235,7 @@ class SourcePawnAbstractMachine(object):
 
     def _nativecall(self, index, paramoffs):
         try:
-            native = self.plugin.natives.values()[index]
+            native = tuple(self.plugin.natives.values())[index]
         except IndexError:
             raise SourcePawnPluginNativeError(
                 'Invalid native index %d' % index)
@@ -282,14 +283,14 @@ class SourcePawnAbstractMachine(object):
             'and': 'dand'
         }
 
-        self._verification = { '': list() }
-        self._func_offs = { }
-        self._label_offs = { }
-        self._to_match = list()
-        self._executed = list()
-        self._processed = list()
+        self._verification = {'': []}
+        self._func_offs = {}
+        self._label_offs = {}
+        self._to_match = []
+        self._executed = []
+        self._processed = []
 
-        sz_lines = map(string.strip, asm.splitlines())
+        sz_lines = map(lambda s: s.strip(), asm.splitlines())
         lines = list(enumerate(sz_lines, 1))
         lines = filter(lambda l: l[1], lines)
         lines = filter(lambda l: not l[1].startswith(';'), lines)
@@ -364,8 +365,8 @@ class SourcePawnAbstractMachine(object):
             if not no_param:
                 self._add_arg(codename, label=True)
         elif self.print_verification:
-            print 'Verification fault:'
-            print '  Unrecognized jump to 0x%08x' % address
+            logger.info('Verification fault:')
+            logger.info('  Unrecognized jump to 0x%08x' % address)
 
         self._processed += zip(old_to_match, self._executed)
         self._executed = list()
@@ -443,7 +444,7 @@ class SourcePawnAbstractMachine(object):
             # Update our processed instructions list
             if self._verification and self._executed:
                 matched = list_pop(self._to_match, 0, ())
-                executed = self._executed[0]
+                executed = self._executed[-1]
                 self._processed.append((matched, executed))
 
             if should_return:
@@ -460,13 +461,13 @@ class SourcePawnAbstractMachine(object):
 
                 if expected_instr != actual_instr and self.print_verification:
                     faults += 1
-                    print 'Verification fault (ASM line %d):' % expected[3]
-                    print '%10s%s' % ('Expected: ', expected_instr)
-                    print '%10s%s' % ('Found: ', actual_instr)
-                    print
+                    logger.info('Verification fault (ASM line %d):' % expected[3])
+                    logger.info('%10s%s' % ('Expected: ', expected_instr))
+                    logger.info('%10s%s' % ('Found: ', actual_instr))
+                    print()
 
             if self.print_verification:
-                print '%d verification fault%s' % (faults, "s"[faults==1:])
+                logger.info('%d verification fault%s' % (faults, "s"[faults==1:]))
 
         # Attempt to determine the tag of the function's return value
         func = self.plugin.debug.symbols_by_addr.get(code_offs)
@@ -483,7 +484,8 @@ class SourcePawnAbstractMachine(object):
                     assert op == 'stack'
                     assert len(args) == 1
                     size = int(args[0], 0x10)
-                    rval = (c_char * size).from_buffer_copy(buffer(self.heap, rval, size)).value
+                    rval = (c_char * size).from_buffer(self.heap, rval).value
+                    rval = rval.decode('utf-8')
 
         return rval
 
@@ -498,7 +500,7 @@ class SourcePawnAbstractMachine(object):
         op = c & ((1 << sizeof(cell)*4)-1)
 
         opname = opcodes[op]
-        self._executed.append((opname, list(), None, None))
+        self._executed.append((opname, [], None, None))
 
         if hasattr(self.instructions, opname):
             op_handler = getattr(self.instructions, opname)
@@ -506,7 +508,7 @@ class SourcePawnAbstractMachine(object):
         else:
             ######################
             # TODO: handle this intentionally
-            print opcodes[op]
+            logger.info(opcodes[op])
 
 
 class PluginFunction(object):

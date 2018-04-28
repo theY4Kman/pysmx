@@ -1,7 +1,10 @@
 # SourcePawn defines
+from __future__ import division
+
 import ctypes
 
 from smx.struct import *
+
 
 SPFILE_MAGIC = 0x53504646
 

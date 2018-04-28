@@ -1,7 +1,12 @@
+from __future__ import division
+
+import io
 import re
 import zlib
 from collections import OrderedDict, defaultdict
 from ctypes import *
+
+from six.moves import xrange
 
 from smx import vm
 from smx.definitions import *
@@ -37,11 +42,11 @@ def _extract_strings_size(buffer, size=0):
 
 def extract_stringtable(base, stringbase, size):
     stringtable = {}
-    buf = buffer(base, stringbase, size)
+    buf = base[stringbase:]
     offset = 0
     while offset <= size:
         s = c_char_p(buf[offset:]).value
-        stringtable[offset] = s
+        stringtable[offset] = s.decode('utf-8')
         offset += len(s)+1
 
     return stringtable
@@ -109,7 +114,7 @@ class Pubvar(StringtableName):
         # Special case for myinfo
         if self.name == 'myinfo':
             # FIXME: this attr dangling off pubvar sucks
-            myinfo_offs = Myinfo(self.plugin.base, self.offs)
+            myinfo_offs = Myinfo.from_buffer_copy(self.plugin.base, self.offs)
             self.myinfo = dict(map(
                 lambda o: (o[0],self.plugin._get_data_string(getattr(
                     myinfo_offs, o[0]))), myinfo_offs._fields_))
@@ -212,7 +217,8 @@ class DbgSymbol(_DbgChild):
 
     @property
     def tag(self):
-        return self.debug.plugin.tags[self.tagid]
+        if self.debug.plugin.tags:
+            return self.debug.plugin.tags[self.tagid]
 
     def __str__(self):
         tag = self.tag.name
@@ -294,7 +300,7 @@ class SourcePawnPlugin(object):
         self.pubvars = None
         self.natives = None
 
-        if buffer is not None:
+        if filelike is not None:
             self.extract_from_buffer(filelike)
 
     def __str__(self):
@@ -356,10 +362,10 @@ class SourcePawnPlugin(object):
         return c_char_p(self.base[self.stringbase + stroffset:]).value
 
     def extract_from_buffer(self, fp):
-        if isinstance(fp, file) and hasattr(fp, 'name'):
+        if isinstance(fp, io.IOBase) and hasattr(fp, 'name'):
             self.name = fp.name
 
-        hdr = sp_file_hdr(fp.read(sizeof(sp_file_hdr)))
+        hdr = sp_file_hdr.from_buffer_copy(fp.read(sizeof(sp_file_hdr)))
 
         if hdr.magic != SPFILE_MAGIC:
             raise SourcePawnPluginFormatError(
@@ -393,30 +399,25 @@ class SourcePawnPlugin(object):
             raise SourcePawnPluginError('Invalid compression type %d' %
                                         hdr.compression)
 
-        self.base = buffer(base)
+        self.base = base
 
-        _total_sectsize = sizeof(sp_file_section) * hdr.sections
-        _sections = (sp_file_section * hdr.sections)()
-        memmove(addressof(_sections),
-                buffer(self.base, _hdr_size, _total_sectsize)[:],
-                _total_sectsize)
+        _sections = (sp_file_section * hdr.sections).from_buffer_copy(base[_hdr_size:])
 
         sections = OrderedDict()
         for sect in _sections[:hdr.sections]:
-            name = c_char_p(buffer(self.base,
-                                   self.stringtab + sect.nameoffs)[:]).value
+            name = c_char_p(self.base[self.stringtab + sect.nameoffs:]).value
+            name = name.decode('utf-8')
             sections[name] = sect
 
         if '.names' in sections:
             sect = sections['.names']
             self.stringbase = sect.dataoffs
-            self.stringtable = extract_stringtable(self.base, sect.dataoffs,
-                                                   sect.size)
+            self.stringtable = extract_stringtable(self.base, sect.dataoffs, sect.size)
         else:
             raise SourcePawnPluginError('Could not locate string base')
 
         if '.code' in sections:
-            cod = sp_file_code(self.base, sections['.code'].dataoffs)
+            cod = sp_file_code.from_buffer_copy(self.base, sections['.code'].dataoffs)
 
             if cod.codeversion < SP_CODEVERS_JIT1:
                 raise SourcePawnPluginFormatError(
@@ -433,7 +434,7 @@ class SourcePawnPlugin(object):
 
         if '.data' in sections:
             sect = sections['.data']
-            dat = sp_file_data(self.base, sect.dataoffs)
+            dat = sp_file_data.from_buffer_copy(self.base, sect.dataoffs)
             self.data = sect.dataoffs + dat.data
             self.datasize = dat.datasize
             self.memsize = dat.memsize
@@ -445,11 +446,9 @@ class SourcePawnPlugin(object):
 
             self.tags = {}
             _tagsize = sizeof(sp_file_tag)
-            self.num_tags = sect.size / _tagsize
+            self.num_tags = sect.size // _tagsize
 
-            tags = (sp_file_tag * self.num_tags)()
-            memmove(addressof(tags),
-                    buffer(self.base, sect.dataoffs, sect.size)[:], sect.size)
+            tags = (sp_file_tag * self.num_tags).from_buffer_copy(self.base[sect.dataoffs:])
 
             for index, tag in enumerate(tags[:self.num_tags]):
                 # XXX: why do String, Float, etc have ridiculously high tag_ids?
@@ -465,14 +464,12 @@ class SourcePawnPlugin(object):
             self.inlines = defaultdict(dict)
             self.publics_by_offs = {}
             _publicsize = sizeof(sp_file_publics)
-            self.num_publics = sect.size / _publicsize
+            self.num_publics = sect.size // _publicsize
 
             # Make our Struct array for easy access
-            publics = (sp_file_publics * self.num_publics)()
-            memmove(addressof(publics),
-                    buffer(self.base, sect.dataoffs, sect.size)[:], sect.size)
+            publics = (sp_file_publics * self.num_publics).from_buffer_copy(self.base[sect.dataoffs:])
 
-            for i,pub in enumerate(publics[:self.num_publics]):
+            for i, pub in enumerate(publics[:self.num_publics]):
                 code_offs = pub.address
                 funcid = (i << 1) | 1
                 _pub = self._public(code_offs, funcid, pub.name)
@@ -487,12 +484,10 @@ class SourcePawnPlugin(object):
             sect = sections['.pubvars']
 
             self.pubvars = []
-            self.num_pubvars = sect.size / sizeof(sp_file_pubvars)
+            self.num_pubvars = sect.size // sizeof(sp_file_pubvars)
 
             # Make our Struct array for easy access
-            pubvars = (sp_file_pubvars * self.num_pubvars)()
-            memmove(addressof(pubvars),
-                    buffer(self.base, sect.dataoffs, sect.size)[:], sect.size)
+            pubvars = (sp_file_pubvars * self.num_pubvars).from_buffer_copy(self.base[sect.dataoffs:])
 
             for pubvar in pubvars[:self.num_pubvars]:
                 offs = self.data + pubvar.address
@@ -507,12 +502,10 @@ class SourcePawnPlugin(object):
             sect = sections['.natives']
 
             self.natives = OrderedDict()
-            self.num_natives = sect.size / sizeof(sp_file_natives)
+            self.num_natives = sect.size // sizeof(sp_file_natives)
 
             # Make our Struct array for easy access
-            natives = (sp_file_natives * self.num_natives)()
-            memmove(addressof(natives),
-                    buffer(self.base, sect.dataoffs, sect.size)[:], sect.size)
+            natives = (sp_file_natives * self.num_natives).from_buffer_copy(self.base[sect.dataoffs:])
 
             for native in natives[:self.num_natives]:
                 native = self._native(0, _invalid_native,
@@ -524,7 +517,7 @@ class SourcePawnPlugin(object):
             self.debug.extract_stringtable(sections['.dbg.strings'].size)
 
         if '.dbg.info' in sections:
-            inf = sp_fdbg_info(self.base, sections['.dbg.info'].dataoffs)
+            inf = sp_fdbg_info.from_buffer_copy(self.base, sections['.dbg.info'].dataoffs)
             self.debug.info = inf
 
         if '.dbg.natives' in sections:
@@ -533,7 +526,7 @@ class SourcePawnPlugin(object):
 
             a_offset = [0]
             def read(klass):
-                inst = klass(self.base, sect.dataoffs + a_offset[0])
+                inst = klass.from_buffer_copy(self.base[sect.dataoffs + a_offset[0]:])
                 a_offset[0] += sizeof(klass)
                 return inst
 
@@ -554,10 +547,8 @@ class SourcePawnPlugin(object):
         if '.dbg.files' in sections:
             sect = sections['.dbg.files']
 
-            num_dbg_files = sect.size / sizeof(sp_fdbg_file)
-            files = (sp_fdbg_file * num_dbg_files)()
-            memmove(addressof(files),
-                    buffer(self.base, sect.dataoffs, sect.size)[:], sect.size)
+            num_dbg_files = sect.size // sizeof(sp_fdbg_file)
+            files = (sp_fdbg_file * num_dbg_files).from_buffer_copy(self.base[sect.dataoffs:])
 
             self.debug.files = []
             for dbg_file in files[:num_dbg_files]:
@@ -568,10 +559,8 @@ class SourcePawnPlugin(object):
         if '.dbg.lines' in sections:
             sect = sections['.dbg.lines']
 
-            num_dbg_lines = sect.size / sizeof(sp_fdbg_line)
-            lines = (sp_fdbg_line * num_dbg_lines)()
-            memmove(addressof(lines),
-                    buffer(self.base, sect.dataoffs, sect.size)[:], sect.size)
+            num_dbg_lines = sect.size // sizeof(sp_fdbg_line)
+            lines = (sp_fdbg_line * num_dbg_lines).from_buffer_copy(self.base[sect.dataoffs:])
 
             self.debug.lines = []
             for line in lines[:num_dbg_lines]:
@@ -586,7 +575,7 @@ class SourcePawnPlugin(object):
             self.debug.symbols_by_addr = OrderedDict()
             i = 0
             while i < sect.size:
-                sym = sp_fdbg_symbol(self.base, sect.dataoffs + i)
+                sym = sp_fdbg_symbol.from_buffer_copy(self.base, sect.dataoffs + i)
                 i += sizeof(sp_fdbg_symbol)
 
                 symbol = self.debug._symbol(sym.addr, sym.tagid, sym.codestart,
@@ -595,7 +584,7 @@ class SourcePawnPlugin(object):
 
                 symbol.arraydims = []
                 for _ in xrange(sym.dimcount):
-                    dim = sp_fdbg_arraydim(self.base, sect.dataoffs + i)
+                    dim = sp_fdbg_arraydim.from_buffer_copy(self.base, sect.dataoffs + i)
                     i += sizeof(sp_fdbg_arraydim)
                     symbol.arraydims.append(dim)
 

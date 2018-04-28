@@ -1,4 +1,9 @@
+from __future__ import division
+
 import ctypes
+
+import six
+
 
 __ctypes__ = [
     'c_bool',
@@ -96,6 +101,7 @@ class StructField(object):
         StructField.creation_counter += 1
 field = StructField
 
+
 class StructBase(type(ctypes.Structure)):
     def __new__(cls, cls_name, bases, attrs):
         fields = []
@@ -125,25 +131,9 @@ class StructBase(type(ctypes.Structure)):
         return new_class
 
 
+@six.add_metaclass(StructBase)
 class Struct(ctypes.Structure):
-    __metaclass__ = StructBase
-
     _fields_ = []
-
-    def __init__(self, base=None, offset=None, size=None):
-        ctypes.Structure.__init__(self)
-
-        args = []
-        if offset is not None:
-            args.append(offset)
-            if size is not None:
-                args.append(size)
-        if base is not None:
-            self.pack_into(buffer(base, *args))
-
-    def pack_into(self, buffer):
-        fit = min(len(buffer), ctypes.sizeof(self))
-        ctypes.memmove(ctypes.addressof(self), buffer[:], fit)
 
     def __repr__(self):
         return '{klass}({fields})'.format(

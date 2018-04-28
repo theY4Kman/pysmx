@@ -1,3 +1,6 @@
+from __future__ import division
+
+import logging
 import re
 import time
 from ctypes import *
@@ -9,6 +12,8 @@ from smx.exceptions import SourcePawnStringFormatError
 from smx.struct import cast_value
 
 __all__ = ['SourceModNatives', 'SourceModSystem']
+
+logger = logging.getLogger(__name__)
 
 
 RGX_NUMBER = re.compile(r'[-+]?\d+')
@@ -355,8 +360,8 @@ class SourceModNatives(object):
         flags = params[4]
 
         for i,param in enumerate(params[1:params[0]+1]):
-            print 'params[%d] = 0x%08x' % (i,param)
-        print 'Interval: %f, func: %d, data: %d, flags: %d' % (interval, func, data, flags)
+            logger.info('params[%d] = 0x%08x' % (i,param))
+        logger.info('Interval: %f, func: %d, data: %d, flags: %d' % (interval, func, data, flags))
 
         return self.sys.timers.create_timer(interval, func, data, flags)
 

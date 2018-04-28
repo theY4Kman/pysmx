@@ -1,3 +1,6 @@
+from __future__ import division
+
+
 class SourcePawnPluginError(Exception):
     """Base exception type for SourcePawn-related errors"""
 
