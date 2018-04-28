@@ -1,3 +1,6 @@
 *.pyc
 .cache/
+.pytest_cache/
 .idea/
+*.egg-info
+dist/
