@@ -113,11 +113,8 @@ def test_interpreter(compile):
         }
     """)
 
-    # This works
+    assert plugin.runtime.call_function_by_name('ReturnTwentyThree') == 23
     assert plugin.runtime.call_function_by_name('ReturnTwentyThreeInner') == 23
-
-    # But this doesn't
-    # assert plugin.runtime.call_function_by_name('ReturnTwentyThree') == 23
 
 
 def test_convars(compile):

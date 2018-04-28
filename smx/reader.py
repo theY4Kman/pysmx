@@ -97,6 +97,7 @@ class Public(StringtableName):
     def is_inline(self):
         if self.name:
             match = RGX_INLINE_NAME.match(self.name)
+            # XXX: heuristic
             if match and int(match.group(1)) == self.code_offs:
                 return True
         return False

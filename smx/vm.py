@@ -1,10 +1,12 @@
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
 import logging
 import struct
 import sys
 from ctypes import *
 from datetime import datetime
+
+import six
 
 from smx.definitions import *
 from smx.exceptions import (
@@ -24,6 +26,7 @@ def list_pop(lst, index=-1, default=None):
         return lst.pop(index)
     except IndexError:
         return default
+
 
 def tohex(val):
     return '%x' % ucell(val).value
@@ -96,6 +99,7 @@ class SourcePawnAbstractMachine(object):
 
         self.STP = len(self.heap)
         self.STK = self.STP
+        self.FRM = self.STK  # XXX: this is a guess. Is this correct?
 
         self.smsys = SourceModSystem(self)
         self.sm_natives = self.smsys.natives
@@ -391,7 +395,7 @@ class SourcePawnAbstractMachine(object):
         return codename
 
     def _add_arg(self, arg, offset=-1, label=False):
-        if not isinstance(arg, str):
+        if not isinstance(arg, six.string_types):
             arg = tohex(arg)
         if label:
             arg = self._asm_alias(arg)
@@ -416,8 +420,6 @@ class SourcePawnAbstractMachine(object):
             return self._offs_to_func[name]
 
     def _execute(self, code_offs, verify_offs=True):
-        rval = None
-
         if not self.initialized:
             self.init()
 
@@ -434,21 +436,13 @@ class SourcePawnAbstractMachine(object):
         self.halted = False
         self.CIP = code_offs
         while not self.halted and self.CIP < self.plugin.pcode.size:
-            should_return = False
-            try:
-                self._step()
-            except Done as e:
-                rval = e.rval
-                should_return = True
+            self._step()
 
             # Update our processed instructions list
             if self._verification and self._executed:
                 matched = list_pop(self._to_match, 0, ())
                 executed = self._executed[-1]
                 self._processed.append((matched, executed))
-
-            if should_return:
-                break
 
         if self._verification:
             faults = 0
@@ -469,7 +463,9 @@ class SourcePawnAbstractMachine(object):
             if self.print_verification:
                 logger.info('%d verification fault%s' % (faults, "s"[faults==1:]))
 
-        # Attempt to determine the tag of the function's return value
+        rval = self.runtime.amx.PRI
+
+        # Peer into debugging symbols to interpret return value as native Python type
         func = self.plugin.debug.symbols_by_addr.get(code_offs)
         if func:
             rv_tag = func.tag
@@ -480,7 +476,7 @@ class SourcePawnAbstractMachine(object):
                 elif tag_name == 'bool':
                     rval = bool(rval)
                 elif tag_name == 'String':
-                    op, args, _, _ = self._executed[-2]
+                    op, args, _, _ = self._executed[-3]
                     assert op == 'stack'
                     assert len(args) == 1
                     size = int(args[0], 0x10)
@@ -520,7 +516,18 @@ class PluginFunction(object):
         self.func_id = func_id
         self.code_offs = code_offs
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args):
+        if not self.runtime.amx.initialized:
+            self.runtime.amx.init()
+
+        # CODE 0 always seems to be a HALT instruction.
+        return_addr = 0
+        self.runtime.amx._push(return_addr)
+
+        # TODO: handle args
+        num_args = 0
+        self.runtime.amx._push(num_args)
+
         rval = self.runtime.amx._execute(self.code_offs)
         return rval
 
@@ -548,7 +555,7 @@ class SourcePawnPluginRuntime(object):
     def printf(self, msg):
         self.console.append((datetime.now(), msg))
         if self.console_redirect is not None:
-            print >> self.console_redirect, msg
+            print(msg, file=self.console_redirect)
 
     def get_function_by_name(self, name):
         if name in self.pubfuncs:
@@ -586,8 +593,7 @@ class SourcePawnPluginRuntime(object):
         self.amx.init()
         self.amx.smsys.tick()
 
-        func = self.get_function_by_name(main)
-        rval = func()
+        rval = self.call_function_by_name(main)
 
         self.amx.smsys.timers.poll_for_timers()
         return rval

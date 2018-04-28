@@ -77,15 +77,10 @@ class SMXInstructions(object):
         amx.CIP = amx._jumprel(amx.CIP)
 
     def retn(self, amx):
-        amx.FRM = 0  # TODO: actual last frame
+        amx.FRM = amx._pop()
         offs = amx._pop()
-        # TODO: verify return address
-        amx.CIP = offs
-        # +sizeof(cell) to pop number of params
-        amx.STK += amx._getstackcell() + sizeof(cell)
-        # Keep our Python stack list updated
-        amx._filter_stack(amx.STK)
-        raise Done(amx.PRI)
+        amx.CIP = offs  # TODO: verify return address
+        num_params = amx._pop()  # XXX: why do this here?
 
     def proc(self, amx):
         amx._push(amx.FRM)
@@ -495,9 +490,14 @@ class SMXInstructions(object):
             offs -= sizeof(cell)
 
     def halt(self, amx):
-        offs = amx._getparam()
-        amx._halt(offs)
-        # TODO
+        # When the developer calls a plugin function using pysmx, the special
+        # return address 0 is used, where the compiler seems to always leave a
+        # halt instr.
+        param = amx._getparam()
+        amx._halt(param)
+
+        # NOTE: it is assumed PRI contains the exit value, which in our case is
+        #       the final return value.
 
     def bounds(self, amx):
         offs = amx._getparam()
