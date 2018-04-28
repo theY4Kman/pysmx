@@ -64,7 +64,32 @@ def test_string_return(compile):
     assert rval == 'hiss'
 
 
-# @pytest.mark.xfail(reason='rvals from inner calls currently unsupported')
+def test_function_calling(compile):
+    plugin = compile("""
+        public OnPluginStart()
+        {
+            for (new i; i<5; i++)
+                func();
+            PrintToServer("end");
+        }
+
+        func()
+        {
+            PrintToServer("func");
+        }
+    """)
+
+    plugin.run()
+    assert plugin.runtime.get_console_output() == '''
+        func
+        func
+        func
+        func
+        func
+        end
+    '''.strip().replace(' ', '')
+
+
 def test_interpreter(compile):
     plugin = compile("""
         #include <sourcemod>

@@ -7,13 +7,14 @@ from ctypes import *
 from datetime import datetime
 
 import six
+from six.moves import xrange
 
 from smx.definitions import *
 from smx.exceptions import (
     SourcePawnVerificationError,
     SourcePawnPluginNativeError,
     SourcePawnPluginError,
-    Done)
+)
 from smx.opcodes import opcodes
 from smx.pawn import SMXInstructions
 from smx.sourcemod import SourceModSystem
@@ -556,6 +557,9 @@ class SourcePawnPluginRuntime(object):
         self.console.append((datetime.now(), msg))
         if self.console_redirect is not None:
             print(msg, file=self.console_redirect)
+
+    def get_console_output(self):
+        return '\n'.join(msg for time, msg in self.console)
 
     def get_function_by_name(self, name):
         if name in self.pubfuncs:

@@ -224,7 +224,6 @@ class PrintfFormatter(object):
         return h
 
 
-
 def atcprintf(_amx, _fmt, _params, _arg, formatter=PrintfFormatter()):
     _len = len(_fmt)
 

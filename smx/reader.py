@@ -354,13 +354,13 @@ class SourcePawnPlugin(object):
         self.pcode.flags = value
 
     def _get_data_string(self, dataoffset):
-        return c_char_p(self.base[self.data + dataoffset:]).value
+        return c_char_p(self.base[self.data + dataoffset:]).value.decode('utf8')
 
     def _get_data_char(self, dataoffset):
         return c_char_p(self.base[self.data + dataoffset:]).value[0]
 
     def _get_string(self, stroffset):
-        return c_char_p(self.base[self.stringbase + stroffset:]).value
+        return c_char_p(self.base[self.stringbase + stroffset:]).value.decode('utf8')
 
     def extract_from_buffer(self, fp):
         if isinstance(fp, io.IOBase) and hasattr(fp, 'name'):
