@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Added
  - Use tox to test py27 and py36
 
+### Fixed
+ - Choose correct compiler on Py3.3+ Linux
+
 
 ## [0.0.2] - 2018-04-27
 ### Added

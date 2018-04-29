@@ -15,13 +15,20 @@ PKG_DIR = os.path.abspath(os.path.dirname(__file__))
 SPCOMP_DIR = os.path.join(PKG_DIR, 'spcomp')
 INCLUDE_DIR = os.path.join(PKG_DIR, 'include')
 
+COMPILERS = {
+    'spcomp.exe': {'win32'},
+    'spcomp.elf': {'linux2', 'linux'},
+    'spcomp.macho': {'darwin'},
+}
+PLATFORMS = {
+    platform: compiler
+    for compiler, platforms in COMPILERS.items()
+    for platform in platforms
+}
+
 
 def _get_compiler_name():
-    return {
-        'win32': 'spcomp.exe',
-        'linux2': 'spcomp.elf',
-        'darwin': 'spcomp.macho',
-    }.get(sys.platform)
+    return PLATFORMS.get(sys.platform)
 
 
 def _abs_compiler_path(*parts):
