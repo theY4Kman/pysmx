@@ -6,6 +6,8 @@ import time
 from ctypes import *
 from functools import wraps
 
+import six
+
 from smx.engine import engine_time
 from smx.definitions import *
 from smx.exceptions import SourcePawnStringFormatError
@@ -290,10 +292,99 @@ def sp_ctof(value):
     return cast_value(c_float, cf)
 
 
-def native(f):
-    """Labels a function/method as a native"""
-    f.is_native = True
-    return f
+class WritableString(object):
+    """Wrapper around string offset and maxlength for easy writing"""
+
+    def __init__(self, natives, string_offs, max_length):
+        self.natives = natives
+        self.string_offs = string_offs
+        self.max_length = max_length
+
+    def write(self, s):
+        num_chars = min(len(s), self.max_length)
+        self.natives.amx._writeheap(self.string_offs, ctypes.create_string_buffer(s.encode('utf8'), num_chars))
+        return num_chars
+
+
+def interpret_params(natives, params, *types):
+    """Convert VM params into native Python types
+
+    Supported types:
+     - cell: for integers (or "any:" tag)
+     - bool: a cell cast to boolean
+     - float: floating point numbers
+     - string: dereferenced pointer into DATA containing a string
+     - writable_string: eats two params (String:s, maxlength) and returns a
+            special object with a .write('string') method, for writing strings
+            back to the plugin.
+     - handle: a handle ID dereferenced to its backing object
+
+    TODO: varargs
+
+    :param natives: SourceModNatives instance
+    :type natives: SourceModNatives
+    :param params: Iterable of params from the VM
+    :param types: list of strings describing how to interpret params
+    """
+    num_params = params[0]
+    args = params[1:1 + num_params]
+    i = 0
+    for type in types:
+        arg = args[i]
+        if type == 'cell' or type is None:
+            yield arg
+        elif type == 'bool':
+            yield bool(arg)
+        elif type == 'float':
+            yield sp_ctof(arg)
+        elif type == 'string':
+            yield natives.amx._local_to_string(arg)
+        elif type == 'writable_string':
+            s = arg
+            i += 1
+            maxlen = args[i]
+            yield WritableString(natives, s, maxlen)
+        elif type == 'handle':
+            yield natives.sys.handles[arg]
+        else:
+            raise ValueError('Unsupported param type %s' % type)
+
+        i += 1
+
+
+def native(f, *types):
+    """Labels a function/method as a native
+
+    Optionally, takes a list of param types to automatically perform parameter
+    unpacking. For example:
+
+        @native('string', 'string', 'string', 'cell', 'bool', 'float', 'bool', 'float')
+        def CreateConVar(name, default_value, description, flags, has_min, min, has_max, max):
+            # ...
+    """
+    interpret = False
+    if isinstance(f, six.string_types):
+        types = (f,) + types
+        interpret = True
+        f = None
+
+    def _native(fn):
+        if interpret:
+            original_fn = fn
+
+            @wraps(original_fn)
+            def _wrapped(self, params):
+                interpreted = tuple(interpret_params(self, params, *types))
+                return original_fn(self, *interpreted)
+            fn = _wrapped
+
+        fn.is_native = True
+        return fn
+
+    if f is None:
+        return _native
+    else:
+        return _native(f)
 
 
 class ConVar(object):
@@ -328,10 +419,8 @@ class SourceModNatives(object):
     def get_native(self, funcname):
         if hasattr(self, funcname):
             func = getattr(self, funcname)
-            if (callable(func) and hasattr(func, 'is_native') and
-                func.is_native):
+            if callable(func) and getattr(func, 'is_native', False):
                 return func
-        return None
 
     @native
     def PrintToServer(self, params):
@@ -339,8 +428,8 @@ class SourceModNatives(object):
         out = atcprintf(self.amx, fmt, params, 2)
         self.printf(out)
 
-    @native
-    def CreateTimer(self, params):
+    @native('float', 'cell', 'cell', 'cell')
+    def CreateTimer(self, interval, func, data, flags):
         """
         native Handle:CreateTimer(Float:interval, Timer:func, any:data=INVALID_HANDLE, flags=0)
 
@@ -353,15 +442,7 @@ class SourceModNatives(object):
         @return            Handle to the timer object.  You do not need to call CloseHandle().
                                If the timer could not be created, INVALID_HANDLE will be returned.
         """
-        interval = sp_ctof(params[1])
-        func = params[2]
-        data = params[3]
-        flags = params[4]
-
-        for i,param in enumerate(params[1:params[0]+1]):
-            logger.info('params[%d] = 0x%08x' % (i,param))
         logger.info('Interval: %f, func: %d, data: %d, flags: %d' % (interval, func, data, flags))
-
         return self.sys.timers.create_timer(interval, func, data, flags)
 
     @native
@@ -384,6 +465,10 @@ class SourceModNatives(object):
         handle = params[1]
         cvar = self.sys.handles[handle]
         return int(cvar.value)
+
+    @native('handle', 'writable_string')
+    def GetConVarString(self, cvar, buf):
+        return buf.write(cvar.value)
 
 
 class SourceModHandles(object):
@@ -421,13 +506,16 @@ class SourceModTimers(object):
         self._timers = []
 
     def create_timer(self, interval, callback, data, flags):
+        handle_id = self.sys.handles.new_handle(None)  # TODO: uhh, actual timer objects
+
         def timer_callback():
             # XXX: call this enter_frame instead?
-            self.sys.runtime.amx._dummy_frame()
-            self.sys.runtime.call_function(callback, data)
+            # self.sys.runtime.amx._dummy_frame()
+            return self.sys.runtime.call_function(callback, handle_id, data)
 
         # TODO: repeating timers
         self._timers.append((engine_time() + interval, timer_callback))
+        return handle_id
 
     def has_timers(self):
         return bool(self._timers)

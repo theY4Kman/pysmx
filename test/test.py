@@ -142,7 +142,7 @@ def test_interpreter(compile):
     assert plugin.runtime.call_function_by_name('ReturnTwentyThreeInner') == 23
 
 
-def test_convars(compile):
+def test_convar_int(compile):
     plugin = compile('''
         new Handle:g_cvar = INVALID_HANDLE;
         public TestCreateConVar() {
@@ -156,3 +156,24 @@ def test_convars(compile):
     plugin.runtime.call_function_by_name('TestCreateConVar')
     value = plugin.runtime.call_function_by_name('TestGetConVarInt')
     assert value == 350
+
+
+def test_convar_string(compile):
+    plugin = compile('''
+        new Handle:g_cvar = INVALID_HANDLE;
+        public TestCreateConVar() {
+            g_cvar = CreateConVar("pysmx_num", "Unique", "description");
+        }
+        String:TestGetConVar() {
+            new String:buffer[12];
+            GetConVarString(g_cvar, buffer, sizeof(buffer));
+            return buffer;
+        }
+        public DontOptimizeOutTestGetConVar() {
+            TestGetConVar();
+        }
+    ''')
+
+    plugin.runtime.call_function_by_name('TestCreateConVar')
+    value = plugin.runtime.call_function_by_name('TestGetConVar')
+    assert value == 'Unique'

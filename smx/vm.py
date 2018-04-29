@@ -269,11 +269,7 @@ class SourcePawnAbstractMachine(object):
             raise SourcePawnPluginError(
                 'Invalid public function index %d' % index)
 
-        self._execute(func.code_offs)
-
-    def _calloffs(self, offs, verify_offs=False):
-        self._execute(offs, verify_offs)
-
+        return self._execute(func.code_offs)
 
     def _verify_asm(self, asm):
         """
@@ -585,11 +581,14 @@ class SourcePawnPluginRuntime(object):
         return func(*args, **kwargs)
 
     def call_function(self, pubindex, *args):
-        i = 0
+        # CODE 0 always seems to be a HALT instruction.
+        return_addr = 0
+        self.amx._push(return_addr)
+
         for arg in args:
             self.amx._push(arg)
-            i += 1
-        self.amx._push(i)
+        self.amx._push(len(args))
+
         self.amx._pubcall(pubindex)
 
     def run(self, main='OnPluginStart'):

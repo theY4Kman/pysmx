@@ -61,8 +61,7 @@ class SMXInstructions(object):
         num_params = amx._getparam()
         amx._push(num_params)
         amx.PRI = amx._nativecall(native_index, amx.STK)
-        amx.STK += (num_params + 1) * sizeof(
-            cell)  # +1 to remove number of params
+        amx.STK += (num_params + 1) * sizeof(cell)  # +1 to remove number of params
         # keep our Python stack in check
         amx._filter_stack(amx.STK)
 
@@ -78,8 +77,8 @@ class SMXInstructions(object):
 
     def retn(self, amx):
         amx.FRM = amx._pop()
-        offs = amx._pop()
-        amx.CIP = offs  # TODO: verify return address
+        return_addr = amx._pop()
+        amx.CIP = return_addr  # TODO: verify return address
         num_params = amx._pop()  # XXX: why do this here?
 
     def proc(self, amx):
