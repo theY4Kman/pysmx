@@ -1,7 +1,27 @@
 language: python
-python: 2.7
+
+os: linux
+
+matrix:
+  include:
+    - python: 2.7
+      env: TOXENV=py27
+    - python: 3.6
+      env: TOXENV=py36
+
+    - os: osx
+      language: generic
+      env: TOXENV=py27
+    - os: osx
+      language: generic
+      env: TOXENV=py36
+
 before_install:
-  - sudo apt-get update
-  - sudo apt-get install -y libc6-i386 lib32stdc++6
-install: pip install -r test-requirements.txt
-script: py.test -v
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get update; fi
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get install -y libc6-i386 lib32stdc++6; fi
+
+install:
+  - ./.travis/install.sh
+
+script:
+  - ./.travis/run.sh
