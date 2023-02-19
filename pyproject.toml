@@ -1,0 +1,37 @@
+[tool.poetry]
+name = "pysmx"
+version = "0.0.2"
+description = "Interact with SourceMod plug-ins"
+authors = ["Zach Kanzler <they4kman@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+packages = [
+    { include = "smx" },
+    { include = "test", format = "sdist" },
+]
+include = [
+    "smx/include/*.inc",
+    "smx/spcomp/spcomp.*",
+    { path = "CHANGELOG.md", format = "sdist" },
+]
+
+[tool.poetry.dependencies]
+python = "^3.7"
+six = "^1.16.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.2.1"
+tox = "^4.4.5"
+
+[tool.pytest.ini_options]
+addopts = "--tb=short -v"
+testpaths = "test/"
+python_files = [
+    "test.py",
+    "test_*.py",
+]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

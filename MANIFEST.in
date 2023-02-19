@@ -1,7 +1,0 @@
-include requirements.txt
-include README.md
-recursive-include smx/include/ *.inc
-include smx/spcomp/spcomp.exe
-include smx/spcomp/spcomp.elf
-include smx/spcomp/spcomp.macho
-exclude test/*
