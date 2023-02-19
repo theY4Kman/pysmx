@@ -1,0 +1,33 @@
+name: pysmx tests
+
+on:
+  - push
+  - pull_request
+
+jobs:
+  build:
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      matrix:
+        platform:
+          - ubuntu-latest
+          # NOTE: MacOS 10.15 dropped 32-bit support, which SourceMod requires. The earliest MacOS runner GitHub
+          #       supports is 10.15 (and even _that_ is deprecated), so we are unable to test macOS with GH actions.
+          # - macos-latest
+          - windows-latest
+        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11']
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install tox tox-gh-actions
+    - name: Test with tox
+      run: tox
+      env:
+        PLATFORM: ${{ matrix.platform }}

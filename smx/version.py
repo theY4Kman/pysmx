@@ -1,4 +1,2 @@
-import six
-
-version_info = (0, 0, 3)
-VERSION = '.'.join(map(six.text_type, version_info[:3]))
+VERSION = '0.0.3'
+version_info = tuple(int(p) for p in VERSION.split('.'))

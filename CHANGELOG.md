@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 
 ## [Unreleased]
+### BREAKING
+ - Drop support for end-of-life Python versions — minimum supported Python version is now 3.7
+
+### Changed
+ - Switch to Poetry
+ - Use GitHub Actions for testing
 
 
 ## [0.0.3] - 2018-04-27
