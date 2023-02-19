@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 
 ## [Unreleased]
+
+
+## [0.0.3] - 2018-04-27
 ### Added
  - Use tox to test py27 and py36
 
@@ -25,4 +28,3 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [0.0.1] - 2018-04-27
 Initial package release
-
