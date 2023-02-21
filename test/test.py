@@ -182,6 +182,22 @@ def test_convar_int(compile):
     assert value == 350
 
 
+def test_convar_float(compile):
+    plugin = compile('''
+        new Handle:g_cvar = INVALID_HANDLE;
+        public TestCreateConVar() {
+            g_cvar = CreateConVar("pysmx_num", "3.14", "description");
+        }
+        public float TestGetConVarFloat() {
+            return GetConVarFloat(g_cvar);
+        }
+    ''')
+
+    plugin.runtime.call_function_by_name('TestCreateConVar')
+    value = plugin.runtime.call_function_by_name('TestGetConVarFloat')
+    assert value == pytest.approx(3.14)
+
+
 def test_convar_string(compile):
     plugin = compile('''
         new Handle:g_cvar = INVALID_HANDLE;

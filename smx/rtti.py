@@ -14,26 +14,42 @@ from smx.definitions import (
 )
 
 if TYPE_CHECKING:
+    from smx.reader import SourcePawnPlugin
     from smx.vm import SourcePawnAbstractMachine
 
 
-def make_type_id(payload: int, kind: int) -> int:
-    """Make a type identifier from a payload and kind."""
+def make_type_id(kind: int, payload: int) -> int:
+    """Make a type identifier from a kind and payload."""
     assert payload <= RTTI_MAX_TYPE_ID_PAYLOAD, f'payload {payload} is too large (max {RTTI_MAX_TYPE_ID_PAYLOAD})'
     assert kind <= RTTI_MAX_TYPE_ID_KIND, f'kind {kind} is too large (max {RTTI_MAX_TYPE_ID_KIND})'
     return (payload << 4) | kind & RTTI_MAX_TYPE_ID_KIND
 
 
 def parse_type_id(type_id: int) -> Tuple[int, int]:
-    """Parse a type identifier into a payload and kind."""
-    return (type_id >> 4) & RTTI_MAX_TYPE_ID_PAYLOAD, type_id & RTTI_MAX_TYPE_ID_KIND
+    """Parse a type identifier into a kind and payload."""
+    kind = type_id & RTTI_MAX_TYPE_ID_KIND
+    payload = (type_id >> 4) & RTTI_MAX_TYPE_ID_PAYLOAD
+    return kind, payload
+
+
+# TODO(zk): move these into RTTIControlByte
+RTTI_CB_NAMES = {
+    RTTIControlByte.BOOL: 'bool',
+    RTTIControlByte.ANY: 'any',
+    RTTIControlByte.INT32: 'int',
+    RTTIControlByte.FLOAT32: 'float',
+    RTTIControlByte.CHAR8: 'char',
+    RTTIControlByte.TOP_FUNCTION: 'Function',
+}
 
 
 @dataclasses.dataclass
 class RTTI:
     """Class representing runtime type information."""
 
-    type: RTTIControlByte
+    plugin: SourcePawnPlugin
+
+    type: RTTIControlByte | int
     index: int = 0
     inner: RTTI | None = None
     is_const: bool = False
@@ -48,6 +64,48 @@ class RTTI:
     def __post_init__(self):
         if not isinstance(self.type, RTTIControlByte):
             self.type = RTTIControlByte(self.type)
+
+    def __str__(self) -> str:
+        if self.type in RTTI_CB_RAW_TYPES:
+            return RTTI_CB_NAMES[self.type]
+
+        if self.type == RTTIControlByte.FIXED_ARRAY:
+            return f'{self.inner}[{self.index}]'
+
+        if self.type == RTTIControlByte.ARRAY:
+            return f'{self.inner}[]'
+
+        if self.type == RTTIControlByte.ENUM:
+            return self.plugin.rtti_enums[self.index].name
+
+        if self.type == RTTIControlByte.TYPEDEF:
+            return self.plugin.rtti_typedefs[self.index].name
+
+        if self.type == RTTIControlByte.TYPESET:
+            return self.plugin.rtti_typesets[self.index].name
+
+        if self.type == RTTIControlByte.CLASSDEF:
+            return self.plugin.rtti_class_defs[self.index].name
+
+        if self.type == RTTIControlByte.FUNCTION:
+            return_type = str(self.inner)
+
+            args = [arg.format_as_arg() for arg in self.args]
+            if self.is_variadic:
+                args.append('...')
+
+            return f'functon {return_type} ({", ".join(args)})'
+
+        if self.type == RTTIControlByte.ENUM_STRUCT:
+            return self.plugin.rtti_enum_structs[self.index].name
+
+        if self.type == RTTIControlByte.VOID:
+            return 'void'
+
+    def format_as_arg(self) -> str:
+        if self.is_by_ref:
+            return f'&{self}'
+        return str(self)
 
     def interpret_value(self, value: int, amx: SourcePawnAbstractMachine) -> Any | None:
         if self.type == RTTIControlByte.BOOL:
@@ -64,6 +122,13 @@ class RTTI:
             else:
                 cells = (cell * self.index).from_buffer(amx.heap, value)
                 return [self.inner.interpret_value(c, amx) for c in cells]
+        elif self.type == RTTIControlByte.ARRAY:
+            # TODO(zk)
+            raise NotImplementedError
+        elif self.type == RTTIControlByte.FUNCTION:
+            return self.inner.interpret_value(value, amx)
+        elif self.type == RTTIControlByte.VOID:
+            return None
         else:
             assert False, f'Unknown RTTI type {self.type}'
 
@@ -71,7 +136,9 @@ class RTTI:
 class RTTIParser:
     """Class for parsing runtime type information."""
 
-    def __init__(self, data: bytes, offset: int):
+    def __init__(self, plugin: SourcePawnPlugin, data: bytes, offset: int):
+        self.plugin = plugin
+
         self.data = data
         self.offset = offset
 
@@ -81,22 +148,27 @@ class RTTIParser:
         # NOTE: _match must be first, as it modifies self.offset
         self.is_const = self._match(RTTIControlByte.CONST) or self.is_const
 
-        type_ = RTTIControlByte(self._read_uint8())
+        type_ = self._read_uint8()
+        try:
+            type_ = RTTIControlByte(type_)
+        except ValueError:
+            pass
+
         if type_ in RTTI_CB_RAW_TYPES:
-            return RTTI(type=type_)
+            return RTTI(self.plugin, type=type_)
 
         if type_ == RTTIControlByte.FIXED_ARRAY:
             size = self.decode_uint32()
             inner = self.decode()
-            return RTTI(type=type_, inner=inner, index=size)
+            return RTTI(self.plugin, type=type_, inner=inner, index=size)
 
         if type_ == RTTIControlByte.ARRAY:
             inner = self.decode()
-            return RTTI(type=type_, inner=inner)
+            return RTTI(self.plugin, type=type_, inner=inner)
 
         if type_ in RTTI_CB_INDEXED_TYPES:
             index = self.decode_uint32()
-            return RTTI(type=type_, index=index)
+            return RTTI(self.plugin, type=type_, index=index)
 
         if type_ == RTTIControlByte.FUNCTION:
             return self.decode_function()
@@ -118,11 +190,11 @@ class RTTIParser:
         is_variadic = self._match(RTTIControlByte.VARIADIC)
 
         if self._match(RTTIControlByte.VOID):
-            return_type = RTTI(type=RTTIControlByte.VOID)
+            return_type = RTTI(self.plugin, type=RTTIControlByte.VOID)
         else:
             return_type = self.decode_new()
 
-        function_type = RTTI(type=RTTIControlByte.FUNCTION, is_variadic=is_variadic, inner=return_type)
+        function_type = RTTI(self.plugin, type=RTTIControlByte.FUNCTION, is_variadic=is_variadic, inner=return_type)
         for _ in range(argc):
             is_by_ref = self._match(RTTIControlByte.BY_REF)
             arg_type = self.decode_new()

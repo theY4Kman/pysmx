@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import re
+import struct
 import time
 from ctypes import c_float, c_int, c_long, pointer
 from functools import wraps
@@ -285,10 +286,14 @@ def atcprintf(_amx, _fmt, _params, _arg, formatter=PrintfFormatter()):
     return state.out
 
 
-def sp_ctof(value):
+def sp_ctof(value: int):
     """Takes a raw value and ctypes casts it to a Python float value"""
     cf = pointer(c_long(value))
     return cast_value(c_float, cf)
+
+
+def sp_ftoc(value: float) -> int:
+    return struct.unpack('<L', struct.pack('<f', value))[0]
 
 
 class WritableString:
@@ -453,26 +458,19 @@ class SourceModNatives:
         logger.info('Interval: %f, func: %d, data: %d, flags: %d' % (interval, func, data, flags))
         return self.sys.timers.create_timer(interval, func, data, flags)
 
-    @native
-    def CreateConVar(self, params):
-        name = self.amx._local_to_string(params[1])
-        default_value = self.amx._local_to_string(params[2])
-        description = self.amx._local_to_string(params[3])
-        flags = params[4]
-        has_min = bool(params[5])
-        min = sp_ctof(params[6]) if has_min else None
-        has_max = bool(params[7])
-        max = sp_ctof(params[8]) if has_max else None
-
-        cvar = ConVar(name, default_value, description, flags, min, max)
+    @native('string', 'string', 'string', 'cell', 'bool', 'float', 'bool', 'float')
+    def CreateConVar(self, name, default_value, description, flags, has_min, min, has_max, max):
+        cvar = ConVar(name, default_value, description, flags, min if has_min else None, max if has_max else None)
         self.sys.convars[name] = cvar
         return self.sys.handles.new_handle(cvar)
 
-    @native
-    def GetConVarInt(self, params):
-        handle = params[1]
-        cvar = self.sys.handles[handle]
+    @native('handle')
+    def GetConVarInt(self, cvar):
         return int(cvar.value)
+
+    @native('handle')
+    def GetConVarFloat(self, cvar):
+        return sp_ftoc(float(cvar.value))
 
     @native('handle', 'writable_string')
     def GetConVarString(self, cvar, buf):

@@ -3,9 +3,8 @@ from __future__ import annotations
 import io
 import re
 import zlib
-from collections import defaultdict
 from ctypes import c_char, c_char_p
-from typing import Any, Dict, List, Type
+from typing import Any, Dict, List
 
 from smx import vm
 from smx.definitions import (
@@ -17,8 +16,16 @@ from smx.definitions import (
     RTTI_VAR_CLASS_GLOBAL,
     RTTI_VAR_CLASS_LOCAL,
     RTTI_VAR_CLASS_STATIC,
+    SmxRTTIClassDefTable,
     SmxRTTIDebugVarTable,
+    SmxRTTIEnumStructFieldTable,
+    SmxRTTIEnumStructTable,
+    SmxRTTIEnumTable,
+    SmxRTTIFieldTable,
     SmxRTTIMethodTable,
+    SmxRTTINativeTable,
+    SmxRTTITypedefTable,
+    SmxRTTITypesetTable,
     SP1_VERSION_1_0,
     SP1_VERSION_1_1,
     SP1_VERSION_1_7,
@@ -34,10 +41,10 @@ from smx.definitions import (
     SP_SYM_REFERENCE,
     SP_SYM_VARARGS,
     SP_SYM_VARIABLE,
-    SPFdbgArrayDim,
     SPFdbgFile,
     SPFdbgInfo,
     SPFdbgLine,
+    SPFdbgNative,
     SPFdbgNtvTab,
     SPFdbgSymbol,
     SPFILE_COMPRESSION_GZ,
@@ -58,39 +65,18 @@ from smx.exceptions import (
     SourcePawnPluginNativeError,
 )
 from smx.rtti import parse_type_id, RTTI, RTTIParser
-from smx.struct import ConStruct
 
 RGX_INLINE_NAME = re.compile(r'^\.(\d+)\.(\w+)')
 
 
-def _extract_strings(buffer, num_strings=1):
-    strings = []
-    offset = 0
-    for i in range(num_strings):
-        s = c_char_p(buffer[offset:]).value
-        strings.append(s)
-        offset += len(s)+1
-    return tuple(strings)
-
-
-def _extract_strings_size(buffer, size=0):
-    strings = []
-    offset = 0
-    while offset < size:
-        s = c_char_p(buffer[offset:]).value
-        strings.append(s)
-        offset += len(s)+1
-    return tuple(strings)
-
-
-def extract_stringtable(base, stringbase, size):
+def extract_stringtable(base: bytes, stringbase: int, size: int) -> Dict[int, str]:
     stringtable = {}
     buf = base[stringbase:]
     offset = 0
     while offset <= size:
         s = c_char_p(buf[offset:]).value
         stringtable[offset] = s.decode('utf-8')
-        offset += len(s)+1
+        offset += len(s) + 1
 
     return stringtable
 
@@ -113,6 +99,12 @@ class StringtableName(_PluginChild):
     @property
     def name(self):
         return self.plugin.stringtable.get(self._name)
+
+    def __str__(self) -> str:
+        return self.name
+
+    def __repr__(self) -> str:
+        return f'<{self.__class__.__name__} {self.name}>'
 
 
 class PCode(_PluginChild):
@@ -166,9 +158,6 @@ class Pubvar(StringtableName):
         else:
             self.myinfo = None
 
-    def __str__(self):
-        return 'Pubvar "%s" (offs: %d)' % (self.name, self.offs)
-
     @property
     def value(self):
         return self.plugin.base[self.offs:]
@@ -204,25 +193,94 @@ class Tag(StringtableName):
 class TypedSymbol:
     def parse_value(self, value: int, amx: vm.SourcePawnAbstractMachine) -> Any | None:
         """Parse the given value using the symbol's typing info"""
-        raise NotImplementedError
+        raise value
 
 
-class RTTIMethod(TypedSymbol, StringtableName):
-    def __init__(self, plugin: SourcePawnPlugin, name: int, pcode_start: int, pcode_end: int, signature: int):
-        super(RTTIMethod, self).__init__(plugin, name)
-        self.pcode_start = pcode_start
-        self.pcode_end = pcode_end
-        self._signature = signature
-
-        self.rtti = plugin.rtti_from_type_id(signature)
-
-    def __str__(self):
-        # TODO(zk): add signature
-        return f'Method "{self.name}" [{self.pcode_start}:{self.pcode_end}]'
+class RTTITypedSymbol(TypedSymbol):
+    rtti: RTTI | None
 
     def parse_value(self, value: int, amx: vm.SourcePawnAbstractMachine) -> Any | None:
         if self.rtti:
             return self.rtti.interpret_value(value, amx)
+
+
+class RTTINamedTypedSymbol(RTTITypedSymbol, StringtableName):
+    def __str__(self) -> str:
+        if self.rtti:
+            return f'{self.name} :: {self.rtti}'
+        return self.name
+
+
+class RTTIEnum(TypedSymbol, StringtableName):
+    pass
+
+
+class RTTIMethod(RTTINamedTypedSymbol, StringtableName):
+    def __init__(self, plugin: SourcePawnPlugin, name: int, pcode_start: int, pcode_end: int, signature: int):
+        super(RTTIMethod, self).__init__(plugin, name)
+        self.pcode_start = pcode_start
+        self.pcode_end = pcode_end
+        self.signature = signature
+
+        self.rtti = plugin.rtti_function_from_offset(signature)
+
+
+class RTTINative(RTTINamedTypedSymbol, StringtableName):
+    def __init__(self, plugin: SourcePawnPlugin, name: int, signature: int):
+        super(RTTINative, self).__init__(plugin, name)
+
+        self.signature = signature
+        self.rtti = plugin.rtti_function_from_offset(signature)
+
+
+class RTTITypedef(RTTINamedTypedSymbol, StringtableName):
+    def __init__(self, plugin: SourcePawnPlugin, name: int, type_id: int):
+        super(RTTITypedef, self).__init__(plugin, name)
+
+        self.type_id = type_id
+        self.rtti = plugin.rtti_from_type_id(type_id)
+
+
+class RTTITypeset(RTTINamedTypedSymbol, StringtableName):
+    def __init__(self, plugin: SourcePawnPlugin, name: int, signature: int):
+        super(RTTITypeset, self).__init__(plugin, name)
+
+        self.signature = signature
+        self.rtti = plugin.rtti_from_type_id(signature)
+
+
+class RTTIEnumStruct(TypedSymbol, StringtableName):
+    def __init__(self, plugin: SourcePawnPlugin, name: int, fields: List[RTTIEnumStructField]):
+        super(RTTIEnumStruct, self).__init__(plugin, name)
+        self.fields = fields
+
+
+class RTTIEnumStructField(RTTINamedTypedSymbol, StringtableName):
+    def __init__(self, plugin: SourcePawnPlugin, name: int, type_id: int, offset: int):
+        super(RTTIEnumStructField, self).__init__(plugin, name)
+
+        self.type_id = type_id
+        self.offset = offset
+
+        self.rtti = plugin.rtti_from_type_id(type_id)
+
+
+class RTTIClassDef(TypedSymbol, StringtableName):
+    def __init__(self, plugin: SourcePawnPlugin, name: int, flags: int, fields: List[RTTIField]):
+        super(RTTIClassDef, self).__init__(plugin, name)
+
+        self.flags = flags
+        self.fields = fields
+
+
+class RTTIField(RTTINamedTypedSymbol, StringtableName):
+    def __init__(self, plugin: SourcePawnPlugin, name: int, flags: int, type_id: int):
+        super(RTTIField, self).__init__(plugin, name)
+
+        self.flags = flags
+        self.type_id = type_id
+
+        self.rtti = plugin.rtti_from_type_id(type_id)
 
 
 class _DbgChild:
@@ -363,20 +421,21 @@ class RTTIDbgVar(TypedSymbol, _DbgChild):
 
 
 class PluginDebug(_PluginChild):
-    def __init__(self, plugin):
+    def __init__(self, plugin: SourcePawnPlugin):
         super(PluginDebug, self).__init__(plugin)
 
         self.unpacked = False
         self.stringbase = None
         self.stringtable = {}
 
-        self.files: List[DbgFile] | None = None
-        self.lines: List[DbgLine] | None = None
-        self.symbols: List[DbgSymbol] | None = None
-        self.vars: List[RTTIDbgVar] | None = None
-        self.symbols_by_addr: Dict[int, TypedSymbol] | None = None
+        self.files: List[DbgFile] = []
+        self.lines: List[DbgLine] = []
+        self.symbols: List[DbgSymbol] = []
+        self.vars: List[RTTIDbgVar] = []
+        self.natives: Dict[int, SPFdbgNative] = {}
+        self.symbols_by_addr: Dict[int, TypedSymbol] = {}
 
-    def extract_stringtable(self, size: int, stringbase=None):
+    def extract_stringtable(self, size: int, stringbase: bytes | None = None):
         if stringbase is None:
             stringbase = self.stringbase
         if stringbase is None:
@@ -385,23 +444,29 @@ class PluginDebug(_PluginChild):
         self.stringtable = extract_stringtable(self.plugin.base, stringbase, size)
         return self.stringtable
 
-    def _get_string(self, offset):
+    def _get_string(self, offset: int):
         if self.stringbase is None:
             raise SourcePawnPluginError(
                 'No debug stringbase to grab strings from')
         return c_char_p(self.plugin.base[self.stringbase + offset:]).value
 
-    # FIXME: talk about a useless layer of abstraction
-    def _file(self, addr, name):
-        return DbgFile(self, addr, name)
+    def _add_file(self, addr, name):
+        file = DbgFile(self, addr, name)
+        self.files.append(file)
+        return file
 
-    def _line(self, addr, line):
-        return DbgLine(self, addr, line)
+    def _add_line(self, addr, line):
+        line = DbgLine(self, addr, line)
+        self.lines.append(line)
+        return line
 
-    def _symbol(self, addr, tagid, codestart, codeend, ident, vclass,
-                dimcount, name, arraydims=()):
-        return DbgSymbol(self, addr, tagid, codestart, codeend, ident, vclass,
-                         dimcount, name, arraydims)
+    def _add_symbol(
+        self, addr, tagid, codestart, codeend, ident, vclass, dimcount, name, arraydims=()
+    ):
+        symbol = DbgSymbol(self, addr, tagid, codestart, codeend, ident, vclass, dimcount, name, arraydims)
+        self.symbols.append(symbol)
+        self.symbols_by_addr[addr] = symbol
+        return symbol
 
 
 class SourcePawnPlugin:
@@ -421,19 +486,41 @@ class SourcePawnPlugin:
         self.pcode: PCode | None = None
 
         self.rtti_data: bytes | None = None
-        self.rtti_methods: Dict[str, RTTIMethod] | None = None
 
-        self.tags: Dict[int, Tag] | None = None
-        self.inlines: Dict[str, Public] | None = None
-        self.publics: Dict[str, Public] | None = None
-        self.publics_by_offs: Dict[int, Public] | None = None
-        self.pubvars: Dict[str, Pubvar] | None = None
-        self.natives: Dict[str, Native] | None = None
+        self.rtti_enums: List[RTTIEnum] = []
+        self.rtti_enums_by_name: Dict[str, RTTIEnum] = {}
 
-        self.num_tags: int | None = None
-        self.num_publics: int | None = None
-        self.num_pubvars: int | None = None
-        self.num_natives: int | None = None
+        self.rtti_methods: Dict[str, RTTIMethod] = {}
+        self.rtti_methods_by_addr: Dict[int, RTTIMethod] = {}
+
+        self.rtti_natives: List[RTTINative] = []
+        self.rtti_natives_by_name: Dict[str, RTTINative] = {}
+
+        self.rtti_typedefs: List[RTTITypedef] = []
+        self.rtti_typedefs_by_name: Dict[str, RTTITypedef] = {}
+
+        self.rtti_typesets: List[RTTITypeset] = []
+        self.rtti_typesets_by_name: Dict[str, RTTITypeset] = {}
+
+        self.rtti_enum_struct_fields: List[RTTIEnumStructField] = []
+        self.rtti_enum_structs: List[RTTIEnumStruct] = []
+        self.rtti_enum_structs_by_name: Dict[str, RTTIEnumStruct] = {}
+
+        self.rtti_fields: List[RTTIField] = []
+        self.rtti_class_defs: List[RTTIClassDef] = []
+        self.rtti_class_defs_by_name: Dict[str, RTTIClassDef] = {}
+
+        self.tags: Dict[int, Tag] = {}
+        self.inlines: Dict[str, Public] = {}
+        self.publics: Dict[str, Public] = {}
+        self.publics_by_offs: Dict[int, Public] = {}
+        self.pubvars: List[Pubvar] = []
+        self.natives: Dict[str, Native] = {}
+
+        self.num_tags: int = 0
+        self.num_publics: int = 0
+        self.num_pubvars: int = 0
+        self.num_natives: int = 0
 
         self._runtime: vm.SourcePawnPluginRuntime | None = None
         self.myinfo: Myinfo | None = None
@@ -466,15 +553,13 @@ class SourcePawnPlugin:
     @property
     def flags(self):
         if self.pcode is None:
-            raise AttributeError('%s instance has no attribute \'flags\'' %
-                                 type(self))
+            raise AttributeError(f"{type(self)} instance has no attribute 'flags'")
         return self.pcode.flags
 
     @flags.setter
     def flags(self, value):
         if self.pcode is None:
-            raise AttributeError('%s instance has no attribute \'flags\'' %
-                                 type(self))
+            raise AttributeError(f"{type(self)} instance has no attribute 'flags'")
         self.pcode.flags = value
 
     def _get_data_string(self, dataoffset: int) -> str:
@@ -490,18 +575,28 @@ class SourcePawnPlugin:
         if self.rtti_data is None:
             raise SourcePawnPluginError('No RTTI data to grab types from')
 
-        payload, kind = parse_type_id(type_id)
+        kind, payload = parse_type_id(type_id)
 
         if kind == RTTI_TYPE_ID_INLINE:
-            parser = RTTIParser(payload.to_bytes(4, 'little', signed=False), 0)
+            parser = RTTIParser(self, payload.to_bytes(4, 'little', signed=False), 0)
             return parser.decode_new()
 
         elif kind == RTTI_TYPE_ID_COMPLEX:
-            # XXX(zk): WHY +2?? It seems to work, but I don't know why.
-            #  Is the RTTIParser wrong? Is there some ushort I've failed to read in rtti.data?
-            parser = RTTIParser(self.rtti_data, payload + 2)
+            parser = self.rtti_parser_from_offset(payload)
             return parser.decode_new()
 
+    def rtti_function_from_offset(self, offset: int) -> RTTI | None:
+        if self.rtti_data is None:
+            raise SourcePawnPluginError('No RTTI data to grab types from')
+
+        parser = self.rtti_parser_from_offset(offset)
+        return parser.decode_function()
+
+    def rtti_parser_from_offset(self, offset: int) -> RTTIParser:
+        if self.rtti_data is None:
+            raise SourcePawnPluginError('No RTTI data to grab types from')
+
+        return RTTIParser(self, self.rtti_data, offset)
 
     def extract_from_buffer(self, fp):
         if isinstance(fp, io.IOBase) and hasattr(fp, 'name'):
@@ -591,10 +686,7 @@ class SourcePawnPlugin:
         if '.tags' in sections:
             sect = sections['.tags']
 
-            self.tags = {}
-            _tagsize = SPFileTag.sizeof()
-            self.num_tags = sect.size // _tagsize
-
+            self.num_tags = sect.size // SPFileTag.sizeof()
             tags = SPFileTag[self.num_tags].parse(self.base[sect.dataoffs:])
 
             for index, tag in enumerate(tags[:self.num_tags]):
@@ -607,33 +699,24 @@ class SourcePawnPlugin:
         if '.publics' in sections:
             sect = sections['.publics']
 
-            self.publics = {}
-            self.inlines = defaultdict(dict)
-            self.publics_by_offs = {}
-            _publicsize = SPFilePublics.sizeof()
-            self.num_publics = sect.size // _publicsize
-
-            # Make our Struct array for easy access
+            self.num_publics = sect.size // SPFilePublics.sizeof()
             publics = SPFilePublics[self.num_publics].parse(self.base[sect.dataoffs:])
 
             for i, pub in enumerate(publics[:self.num_publics]):
                 code_offs = pub.address
                 funcid = (i << 1) | 1
-                _pub = Public(self, code_offs, funcid, pub.name)
-                self.publics[_pub.name] = _pub
-                self.publics_by_offs[code_offs] = _pub
+                pub = Public(self, code_offs, funcid, pub.name)
+                self.publics[pub.name] = pub
+                self.publics_by_offs[code_offs] = pub
 
-                if _pub.is_inline():
-                    self.inlines[_pub.get_function_name()] = _pub
+                if pub.is_inline():
+                    self.inlines[pub.get_function_name()] = pub
 
         # Variables defined as public, most importantly myinfo
         if '.pubvars' in sections:
             sect = sections['.pubvars']
 
-            self.pubvars = []
             self.num_pubvars = sect.size // SPFilePubvars.sizeof()
-
-            # Make our Struct array for easy access
             pubvars = SPFilePubvars[self.num_pubvars].parse(self.base[sect.dataoffs:])
 
             for pubvar in pubvars[:self.num_pubvars]:
@@ -648,10 +731,7 @@ class SourcePawnPlugin:
         if '.natives' in sections:
             sect = sections['.natives']
 
-            self.natives = {}
             self.num_natives = sect.size // SPFileNatives.sizeof()
-
-            # Make our Struct array for easy access
             natives = SPFileNatives[self.num_natives].parse(self.base[sect.dataoffs:])
 
             for native in natives[:self.num_natives]:
@@ -670,18 +750,8 @@ class SourcePawnPlugin:
 
         if '.dbg.natives' in sections:
             sect = sections['.dbg.natives']
-            self.debug.natives = {}
 
-            a_offset = 0
-
-            def read(klass: Type[ConStruct]):
-                nonlocal a_offset
-                inst = klass.parse(self.base[sect.dataoffs + a_offset:])
-                a_offset += klass.sizeof()
-                return inst
-
-            ntvtab = read(SPFdbgNtvTab)
-
+            ntvtab = SPFdbgNtvTab.parse(self.base[sect.dataoffs:])
             for native in ntvtab.natives:
                 self.debug.natives[native.index] = native
 
@@ -691,11 +761,8 @@ class SourcePawnPlugin:
             num_dbg_files = sect.size // SPFdbgFile.sizeof()
             files = SPFdbgFile[num_dbg_files].parse(self.base[sect.dataoffs:])
 
-            self.debug.files = []
-            for dbg_file in files[:num_dbg_files]:
-                self.debug.files.append(
-                    self.debug._file(dbg_file.addr, dbg_file.name)
-                )
+            for dbg_file in files:
+                self.debug._add_file(dbg_file.addr, dbg_file.name)
 
         if '.dbg.lines' in sections:
             sect = sections['.dbg.lines']
@@ -703,50 +770,46 @@ class SourcePawnPlugin:
             num_dbg_lines = sect.size // SPFdbgLine.sizeof()
             lines = SPFdbgLine[num_dbg_lines].parse(self.base[sect.dataoffs:])
 
-            self.debug.lines = []
-            for line in lines[:num_dbg_lines]:
-                self.debug.lines.append(
-                    self.debug._line(line.addr, line.line)
-                )
+            for line in lines:
+                self.debug._add_line(line.addr, line.line)
 
         if '.dbg.symbols' in sections:
             sect = sections['.dbg.symbols']
-
-            self.debug.symbols = []
-
-            if self.debug.symbols_by_addr is None:
-                self.debug.symbols_by_addr = {}
 
             i = 0
             while i < sect.size:
                 sym = SPFdbgSymbol.parse(self.base[sect.dataoffs + i:])
                 i += SPFdbgSymbol.sizeof()
 
-                symbol = self.debug._symbol(sym.addr, sym.tagid, sym.codestart,
-                                            sym.codeend, sym.ident, sym.vclass,
-                                            sym.dimcount, sym.name)
-
-                symbol.arraydims = []
-                for _ in range(sym.dimcount):
-                    dim = SPFdbgArrayDim.parse(self.base[sect.dataoffs + i:])
-                    i += SPFdbgArrayDim.sizeof()
-                    symbol.arraydims.append(dim)
-
-                self.debug.symbols.append(symbol)
-                self.debug.symbols_by_addr[symbol.addr] = symbol
+                self.debug._add_symbol(
+                    sym.addr,
+                    sym.tagid,
+                    sym.codestart,
+                    sym.codeend,
+                    sym.ident,
+                    sym.vclass,
+                    sym.dimcount,
+                    sym.name,
+                    sym.dims,
+                )
 
         if 'rtti.data' in sections:
             sect = sections['rtti.data']
             self.rtti_data = self.base[sect.dataoffs:sect.dataoffs + sect.size]
 
+        if 'rtti.enums' in sections:
+            sect = sections['rtti.enums']
+            enums_table = SmxRTTIEnumTable.parse(self.base[sect.dataoffs:])
+
+            for enum in enums_table.enums:
+                rtti_enum = RTTIEnum(plugin=self, name=enum.name)
+                self.rtti_enums.append(rtti_enum)
+                self.rtti_enums_by_name[rtti_enum.name] = rtti_enum
+
         if 'rtti.methods' in sections:
             sect = sections['rtti.methods']
             methods_table = SmxRTTIMethodTable.parse(self.base[sect.dataoffs:])
 
-            if self.debug.symbols_by_addr is None:
-                self.debug.symbols_by_addr = {}
-
-            self.rtti_methods = {}
             for meth in methods_table.methods:
                 rtti_method = RTTIMethod(
                     plugin=self,
@@ -755,17 +818,122 @@ class SourcePawnPlugin:
                     pcode_end=meth.pcode_end,
                     signature=meth.signature,
                 )
-                self.rtti_methods[meth.name] = rtti_method
+                self.rtti_methods[rtti_method.name] = rtti_method
+                self.rtti_methods_by_addr[meth.pcode_start] = rtti_method
                 self.debug.symbols_by_addr[meth.pcode_start] = rtti_method
+
+        if 'rtti.natives' in sections:
+            sect = sections['rtti.natives']
+            natives_table = SmxRTTINativeTable.parse(self.base[sect.dataoffs:])
+
+            for native in natives_table.natives:
+                rtti_native = RTTINative(
+                    plugin=self,
+                    name=native.name,
+                    signature=native.signature,
+                )
+                self.rtti_natives.append(rtti_native)
+                self.rtti_natives_by_name[rtti_native.name] = rtti_native
+
+        if 'rtti.typedefs' in sections:
+            sect = sections['rtti.typedefs']
+            typedefs_table = SmxRTTITypedefTable.parse(self.base[sect.dataoffs:])
+
+            for typedef in typedefs_table.typedefs:
+                rtti_typedef = RTTITypedef(
+                    plugin=self,
+                    name=typedef.name,
+                    type_id=typedef.type_id,
+                )
+                self.rtti_typedefs.append(rtti_typedef)
+                self.rtti_typedefs_by_name[rtti_typedef.name] = rtti_typedef
+
+        if 'rtti.typesets' in sections:
+            sect = sections['rtti.typesets']
+            typesets_table = SmxRTTITypesetTable.parse(self.base[sect.dataoffs:])
+
+            for typeset in typesets_table.typesets:
+                rtti_typeset = RTTITypeset(
+                    plugin=self,
+                    name=typeset.name,
+                    signature=typeset.signature,
+                )
+                self.rtti_typesets.append(rtti_typeset)
+                self.rtti_typesets_by_name[rtti_typeset.name] = rtti_typeset
+
+        if 'rtti.enumstructs' in sections:
+            if 'rtti.es_fields' not in sections:
+                raise SourcePawnPluginFormatError('rtti.es_fields section is missing, but required by rtti.enumstructs')
+
+            sect = sections['rtti.es_fields']
+            es_fields_table = SmxRTTIEnumStructFieldTable.parse(self.base[sect.dataoffs:])
+            for es_field in es_fields_table.fields:
+                rtti_es_field = RTTIEnumStructField(
+                    plugin=self,
+                    name=es_field.name,
+                    type_id=es_field.type_id,
+                    offset=es_field.offset,
+                )
+                self.rtti_enum_struct_fields.append(rtti_es_field)
+
+            sect = sections['rtti.enumstructs']
+            enumstructs_table = SmxRTTIEnumStructTable.parse(self.base[sect.dataoffs:])
+
+            for i, enumstruct in enumerate(enumstructs_table.enumstructs):
+                next_enumstruct = (
+                    enumstructs_table.enumstructs[i + 1]
+                    if i + 1 < len(enumstructs_table.enumstructs)
+                    else None
+                )
+                last_field = next_enumstruct.first_field if next_enumstruct else len(self.rtti_enum_struct_fields)
+
+                rtti_enum_struct = RTTIEnumStruct(
+                    plugin=self,
+                    name=enumstruct.name,
+                    fields=self.rtti_enum_struct_fields[enumstruct.first_field:last_field],
+                )
+                self.rtti_enum_structs.append(rtti_enum_struct)
+                self.rtti_enum_structs_by_name[rtti_enum_struct.name] = rtti_enum_struct
+
+        if 'rtti.classdef' in sections:
+            if 'rtti.fields' not in sections:
+                raise SourcePawnPluginFormatError('rtti.fields section is missing, but required by rtti.classdef')
+
+            sect = sections['rtti.fields']
+            fields_table = SmxRTTIFieldTable.parse(self.base[sect.dataoffs:])
+
+            for field in fields_table.fields:
+                rtti_field = RTTIField(
+                    plugin=self,
+                    name=field.name,
+                    flags=field.flags,
+                    type_id=field.type_id,
+                )
+                self.rtti_fields.append(rtti_field)
+
+            sect = sections['rtti.classdef']
+            classdef_table = SmxRTTIClassDefTable.parse(self.base[sect.dataoffs:])
+
+            for i, classdef in enumerate(classdef_table.classdefs):
+                next_classdef = (
+                    classdef_table.classdefs[i + 1]
+                    if i + 1 < len(classdef_table.classdefs)
+                    else None
+                )
+                last_field = next_classdef.first_field if next_classdef else len(self.rtti_fields)
+
+                rtti_classdef = RTTIClassDef(
+                    plugin=self,
+                    name=classdef.name,
+                    flags=classdef.flags,
+                    fields=self.rtti_fields[classdef.first_field:last_field],
+                )
+                self.rtti_class_defs.append(rtti_classdef)
+                self.rtti_class_defs_by_name[rtti_classdef.name] = rtti_classdef
 
         for rtti_var_sect_name in ('.dbg.globals', '.dbg.locals'):
             if rtti_var_sect_name not in sections:
                 continue
-
-            if self.debug.vars is None:
-                self.debug.vars = []
-            if self.debug.symbols_by_addr is None:
-                self.debug.symbols_by_addr = {}
 
             sect = sections[rtti_var_sect_name]
             vars_tab = SmxRTTIDebugVarTable.parse(self.base[sect.dataoffs:])
