@@ -5,12 +5,25 @@
 
 ## Quickstart
 
+```shell
+pip install pysmx
+```
+
 ```python
-from smx.compile import compile
+from smx.compiler import compile
+
 plugin = compile('''
     public TwoPlusTwo() {
         return 2 + 2;
     }
+    public String:Snakes() {
+        new String:s[] = "hiss";
+        return s;
+    }
 ''')
-print plugin.runtime.call_function_by_name('TwoPlusTwo')
+
+print(plugin.runtime.call_function_by_name('TwoPlusTwo'))
+# 4
+print(plugin.runtime.call_function_by_name('Snakes'))
+# 'hiss'
 ```
