@@ -1,9 +1,9 @@
-from __future__ import division
-
 import ctypes
+from dataclasses import dataclass
+from typing import TypeVar, Type, BinaryIO, Dict, Any, List
 
-import six
-
+import construct as cs
+from construct_typed import DataclassMixin, DataclassStruct, Construct
 
 __ctypes__ = [
     'c_bool',
@@ -72,6 +72,7 @@ __cftypes__ = [
 __static_all__ = ['StructField', 'field', 'StructBase', 'Struct', 'NoAlignStruct', 'cast_value']
 __all__ = __cftypes__ + __static_all__
 
+
 # We can't import this directly, so grab it from any C type
 PyCSimpleType = type(ctypes.c_byte)
 
@@ -80,7 +81,7 @@ def cast_value(ctyp, value):
     return ctypes.cast(value, ctypes.POINTER(ctyp)).contents.value
 
 
-class StructField(object):
+class StructField:
     creation_counter = 0
 
     def __init__(self, ctyp=None, width=None):
@@ -99,16 +100,18 @@ class StructField(object):
 
         self.creation_counter = StructField.creation_counter
         StructField.creation_counter += 1
+
+
 field = StructField
 
 
-class StructBase(type(ctypes.Structure)):
+class StructBase(type(ctypes.LittleEndianStructure)):
     def __new__(cls, cls_name, bases, attrs):
         fields = []
         order = {}
         module = attrs.pop('__module__')
-        new_attrs = { '__module__': module }
-        for name,value in attrs.items():
+        new_attrs = {'__module__': module}
+        for name, value in attrs.items():
             if isinstance(value, StructField):
                 fields.append((name, value.ctyp))
                 order[name] = value.creation_counter
@@ -117,13 +120,11 @@ class StructBase(type(ctypes.Structure)):
 
         fields = sorted(fields, key=lambda o: order[o[0]])
 
-        if '_fields_' in attrs:
-            if isinstance(attrs['_fields_'], list):
-                new_attrs['_fields_'] = attrs['_fields_'] + fields
-            else:
-                raise TypeError('\'_fields_\' must be a list of pairs')
-        else:
-            new_attrs['_fields_'] = fields
+        for base in bases:
+            if hasattr(base, '_fields_'):
+                fields = base._fields_ + fields
+
+        new_attrs['_fields_'] = fields
 
         super_new = super(StructBase, cls).__new__
         new_class = super_new(cls, cls_name, bases, new_attrs)
@@ -131,15 +132,14 @@ class StructBase(type(ctypes.Structure)):
         return new_class
 
 
-@six.add_metaclass(StructBase)
-class Struct(ctypes.Structure):
+class Struct(ctypes.LittleEndianStructure, metaclass=StructBase):
     _fields_ = []
 
     def __repr__(self):
         return '{klass}({fields})'.format(
             klass=self.__class__.__name__,
             fields=', '.join('%s=%r' % (attr, getattr(self, attr))
-                             for attr,_ in self._fields_)
+                             for attr, _ in self._fields_)
         )
 
 
@@ -150,15 +150,62 @@ class NoAlignStruct(Struct):
 def ctyp_field_init(self, width=None):
     StructField.__init__(self, width=width)
 
-glb = globals()
-ctyp_found = []
-for name,field_name in zip(__ctypes__, __cftypes__):
-    if not hasattr(ctypes, name):
-        continue
-    ctyp = getattr(ctypes, name)
-    field_ctyp = type('_%s_StructField' % name,
-        (StructField,), { 'ctyp': ctyp, '__init__': ctyp_field_init })
-    glb[field_name] = field_ctyp
-    ctyp_found.append(field_name)
 
-__all__ = __static_all__ + ctyp_found
+_TYPED_STRUCT_AS_STRUCT_KEY = '__struct'
+
+StructT = TypeVar('StructT', bound='Struct')
+
+
+class _ConStructMeta(type):
+    def __new__(mcs, *args, **kwargs):
+        cls = super().__new__(mcs, *args, **kwargs)
+        cls = dataclass(cls)
+        return cls
+
+
+class ConStruct(DataclassMixin, metaclass=_ConStructMeta):
+    @classmethod
+    def as_struct(cls) -> cs.Struct:
+        if not hasattr(cls, _TYPED_STRUCT_AS_STRUCT_KEY):
+            setattr(cls, _TYPED_STRUCT_AS_STRUCT_KEY, DataclassStruct(cls))
+        return getattr(cls, _TYPED_STRUCT_AS_STRUCT_KEY)
+
+    @classmethod
+    def build(cls: Type[StructT], obj: StructT, **contextkw) -> bytes:
+        return cls.as_struct().build(obj, **contextkw)
+
+    @classmethod
+    def build_stream(cls: Type[StructT], obj: StructT, stream: BinaryIO, **contextkw) -> None:
+        cls.as_struct().build_stream(obj, stream, **contextkw)
+
+    @classmethod
+    def parse(cls: Type[StructT], data: bytes, **contextkw) -> StructT:
+        return cls.as_struct().parse(data, **contextkw)
+
+    @classmethod
+    def parse_stream(cls: Type[StructT], stream: BinaryIO, **contextkw) -> StructT:
+        return cls.as_struct().parse_stream(stream, **contextkw)
+
+    def __class_getitem__(cls, count) -> Construct:
+        return cls.as_struct()[count]
+
+    @classmethod
+    def sizeof(cls, **contextkw) -> int:
+        return cls.as_struct().sizeof(**contextkw)
+
+
+def _init_ctype_fields(glb: Dict[str, Any]) -> List[str]:
+    ctypes_found = []
+    for name, field_name in zip(__ctypes__, __cftypes__):
+        if not hasattr(ctypes, name):
+            continue
+        ctyp = getattr(ctypes, name)
+        field_ctyp = type('_%s_StructField' % name,
+                          (StructField,), {'ctyp': ctyp, '__init__': ctyp_field_init})
+        glb[field_name] = field_ctyp
+        ctypes_found.append(field_name)
+
+    return ctypes_found
+
+
+__all__ = __static_all__ + _init_ctype_fields(globals()) + ['ConStruct']

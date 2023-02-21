@@ -1,6 +1,3 @@
-from __future__ import division
-
-
 class SourcePawnPluginError(Exception):
     """Base exception type for SourcePawn-related errors"""
 
@@ -15,10 +12,6 @@ class SourcePawnPluginNativeError(SourcePawnPluginError):
 
 class SourcePawnStringFormatError(SourcePawnPluginNativeError):
     """Error during string formatting natives (PrintToChat, etc)"""
-
-
-class SourcePawnVerificationError(SourcePawnPluginError):
-    """Error verifying assembly against bytecode ops actually executed"""
 
 
 class SourcePawnOpcodeDeprecated(DeprecationWarning):

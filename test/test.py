@@ -1,14 +1,38 @@
+import textwrap
+
 import pytest
 
 import smx.compiler
 
 
-@pytest.fixture(scope='session')
-def compile():
-    def compile(code, **options):
-        # TODO: auto-insert #include <sourcemod> and default Plugin:myinfo
-        plugin = smx.compiler.compile(code)
-        plugin.runtime.amx.print_verification = False
+@pytest.fixture
+def myinfo(request):
+    return {
+        'name': request.node.name,
+        'author': 'Test Author',
+        'description': request.node.nodeid,
+        'version': '1.0.0',
+        'url': 'https://github.com/they4kman/pysmx',
+    }
+
+
+@pytest.fixture
+def myinfo_sp(myinfo) -> str:
+    entries = [
+        f'{key} = "{value}"'
+        for key, value in myinfo.items()
+    ]
+    body = textwrap.indent(',\n'.join(entries), '  ')
+    defn = f'public Plugin:myinfo = {{\n{body}\n}};'
+    return defn
+
+
+@pytest.fixture
+def compile(myinfo_sp):
+    def compile(source, *, include_myinfo: bool = True, **options):
+        if include_myinfo:
+            source = f'{myinfo_sp}\n\n{source}'
+        plugin = smx.compiler.compile(source, **options)
         return plugin
     return compile
 
@@ -136,7 +160,7 @@ def test_interpreter(compile):
         ReturnTwentyThreeInner() {
             return 23;
         }
-    """)
+    """, include_myinfo=False)
 
     assert plugin.runtime.call_function_by_name('ReturnTwentyThree') == 23
     assert plugin.runtime.call_function_by_name('ReturnTwentyThreeInner') == 23

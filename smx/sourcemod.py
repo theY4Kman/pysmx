@@ -125,7 +125,7 @@ def isformatfunc(f):
     return callable(f) and hasattr(f, 'formatfunc') and f.formatfunc
 
 
-class PrintfFormatter(object):
+class PrintfFormatter:
     def __init__(self):
         # A mapping of format characters to their format functions
         self.format_chars = { }
@@ -292,7 +292,7 @@ def sp_ctof(value):
     return cast_value(c_float, cf)
 
 
-class WritableString(object):
+class WritableString:
     """Wrapper around string offset and maxlength for easy writing"""
 
     def __init__(self, natives, string_offs, max_length):
@@ -301,8 +301,9 @@ class WritableString(object):
         self.max_length = max_length
 
     def write(self, s):
-        num_chars = min(len(s), self.max_length)
-        self.natives.amx._writeheap(self.string_offs, ctypes.create_string_buffer(s.encode('utf8'), num_chars))
+        # +1 for null terminator
+        num_chars = min(len(s) + 1, self.max_length)
+        self.natives.amx._writeheap(self.string_offs, ctypes.create_string_buffer(s.encode('utf8') + b'\0', num_chars))
         return num_chars
 
 
@@ -387,7 +388,7 @@ def native(f, *types):
         return _native(f)
 
 
-class ConVar(object):
+class ConVar:
     def __init__(self, name, default_value, description='', flags=0, min=None, max=None):
         self.name = name
         self.value = self.default_value = default_value
@@ -403,7 +404,7 @@ class ConVar(object):
         return '<ConVar %s %r>' % (self.name, self.value)
 
 
-class SourceModNatives(object):
+class SourceModNatives:
     def __init__(self, sys):
         """
         @type   sys: smx.sourcemod.SourceModSystem
@@ -471,7 +472,7 @@ class SourceModNatives(object):
         return buf.write(cvar.value)
 
 
-class SourceModHandles(object):
+class SourceModHandles:
     """Emulates SourceMod's handles"""
 
     def __init__(self, sys):
@@ -489,7 +490,7 @@ class SourceModHandles(object):
         return self._handles[handle_id]
 
 
-class SourceModTimers(object):
+class SourceModTimers:
     """Handles SourceMod timers"""
 
     TIMER_REPEAT = (1<<0)               # Timer will repeat until it returns Plugin_Stop
@@ -534,7 +535,7 @@ class SourceModTimers(object):
                 callback()
 
 
-class SourceModSystem(object):
+class SourceModSystem:
     """Emulates all SourcePawn -> SourceMod interactions"""
 
     def __init__(self, amx):

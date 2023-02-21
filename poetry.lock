@@ -56,6 +56,35 @@ files = [
 ]
 
 [[package]]
+name = "construct"
+version = "2.10.68"
+description = "A powerful declarative symmetric parser/builder for binary data"
+category = "main"
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "construct-2.10.68.tar.gz", hash = "sha256:7b2a3fd8e5f597a5aa1d614c3bd516fa065db01704c72a1efaaeec6ef23d8b45"},
+]
+
+[package.extras]
+extras = ["arrow", "cloudpickle", "enum34", "lz4", "numpy", "ruamel.yaml"]
+
+[[package]]
+name = "construct-typing"
+version = "0.5.5"
+description = "Extension for the python package 'construct' that adds typing features"
+category = "main"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "construct-typing-0.5.5.tar.gz", hash = "sha256:29d1a07df539ae096bd1388ad7f58714d229a303047425d3830b282d8b154572"},
+    {file = "construct_typing-0.5.5-py3-none-any.whl", hash = "sha256:bfce2fa170373abe782c2ebaa7f52e14e8f7863a437b7ab63bf74287f922a655"},
+]
+
+[package.dependencies]
+construct = "2.10.68"
+
+[[package]]
 name = "distlib"
 version = "0.3.6"
 description = "Distribution utilities"
@@ -227,18 +256,6 @@ tomli = {version = ">=1.0.0", markers = "python_version < \"3.11\""}
 testing = ["argcomplete", "hypothesis (>=3.56)", "mock", "nose", "pygments (>=2.7.2)", "requests", "xmlschema"]
 
 [[package]]
-name = "six"
-version = "1.16.0"
-description = "Python 2 and 3 compatibility utilities"
-category = "main"
-optional = false
-python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*"
-files = [
-    {file = "six-1.16.0-py2.py3-none-any.whl", hash = "sha256:8abb2f1d86890a2dfb989f9a77cfcfd3e47c2a354b01111771326f8aa26e0254"},
-    {file = "six-1.16.0.tar.gz", hash = "sha256:1e61c37477a1626458e36f7b1d82aa5c9b094fa4802892072e49de9c60c4c926"},
-]
-
-[[package]]
 name = "tomli"
 version = "2.0.1"
 description = "A lil' TOML parser"
@@ -333,4 +350,4 @@ testing = ["flake8 (<5)", "func-timeout", "jaraco.functools", "jaraco.itertools"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.7"
-content-hash = "ffd4bef42754bd045bb004b75ba4757552bb1e6633cd93fb3c7914346ef6daf1"
+content-hash = "24705123eedd69f9c54910b7901ad3c756957a04d726f9648949906520c6c98c"
