@@ -49,21 +49,21 @@ class RTTI:
         if not isinstance(self.type, RTTIControlByte):
             self.type = RTTIControlByte(self.type)
 
-    def interpret_value(self, value: int, spvm: SourcePawnAbstractMachine) -> Any | None:
+    def interpret_value(self, value: int, amx: SourcePawnAbstractMachine) -> Any | None:
         if self.type == RTTIControlByte.BOOL:
             return bool(value)
         elif self.type in (RTTIControlByte.ANY, RTTIControlByte.INT32, RTTIControlByte.CHAR8):
             return value
         elif self.type == RTTIControlByte.FLOAT32:
             # TODO(zk): less roundabout parsing?
-            return spvm._sp_ctof(cell(value))
+            return amx._sp_ctof(cell(value))
         elif self.type == RTTIControlByte.FIXED_ARRAY:
             if self.inner.type == RTTIControlByte.CHAR8:
-                buf = (c_char * self.index).from_buffer(spvm.heap, value).value
+                buf = (c_char * self.index).from_buffer(amx.heap, value).value
                 return buf.decode('utf-8')
             else:
-                cells = (cell * self.index).from_buffer(spvm.heap, value)
-                return [self.inner.interpret_value(c, spvm) for c in cells]
+                cells = (cell * self.index).from_buffer(amx.heap, value)
+                return [self.inner.interpret_value(c, amx) for c in cells]
         else:
             assert False, f'Unknown RTTI type {self.type}'
 

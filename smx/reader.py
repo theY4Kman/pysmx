@@ -202,7 +202,7 @@ class Tag(StringtableName):
 
 
 class TypedSymbol:
-    def parse_value(self, value: int, spvm: vm.SourcePawnAbstractMachine) -> Any | None:
+    def parse_value(self, value: int, amx: vm.SourcePawnAbstractMachine) -> Any | None:
         """Parse the given value using the symbol's typing info"""
         raise NotImplementedError
 
@@ -220,9 +220,9 @@ class RTTIMethod(TypedSymbol, StringtableName):
         # TODO(zk): add signature
         return f'Method "{self.name}" [{self.pcode_start}:{self.pcode_end}]'
 
-    def parse_value(self, value: int, spvm: vm.SourcePawnAbstractMachine) -> Any | None:
+    def parse_value(self, value: int, amx: vm.SourcePawnAbstractMachine) -> Any | None:
         if self.rtti:
-            return self.rtti.interpret_value(value, spvm)
+            return self.rtti.interpret_value(value, amx)
 
 
 class _DbgChild:
@@ -289,22 +289,22 @@ class DbgSymbol(TypedSymbol, _DbgChild):
         if self.debug.plugin.tags:
             return self.debug.plugin.tags[self.tagid]
 
-    def parse_value(self, value: int, spvm: vm.SourcePawnAbstractMachine) -> Any | None:
+    def parse_value(self, value: int, amx: vm.SourcePawnAbstractMachine) -> Any | None:
         """Parse the given value using the symbol's typing info"""
         if not self.tag:
             return None
 
         tag_name = self.tag.name
         if tag_name == 'Float':
-            return spvm._sp_ctof(cell(value))
+            return amx._sp_ctof(cell(value))
         elif tag_name == 'bool':
             return bool(value)
         elif tag_name == 'String':
-            op, args, _, _ = spvm._executed[-3]
+            op, args, _, _ = amx._executed[-3]
             assert op == 'stack'
             assert len(args) == 1
             size = int(args[0], 0x10)
-            rval = (c_char * size).from_buffer(spvm.heap, value).value
+            rval = (c_char * size).from_buffer(amx.heap, value).value
             return rval.decode('utf-8')
 
     def __str__(self):
@@ -353,8 +353,8 @@ class RTTIDbgVar(TypedSymbol, _DbgChild):
     def name(self):
         return self.debug.plugin.stringtable.get(self._name)
 
-    def parse_value(self, value: int, spvm: vm.SourcePawnAbstractMachine) -> Any | None:
-        return self.rtti.interpret_value(value, spvm)
+    def parse_value(self, value: int, amx: vm.SourcePawnAbstractMachine) -> Any | None:
+        return self.rtti.interpret_value(value, amx)
 
     def __str__(self) -> str:
         table_name = 'globals' if self.vclass_kind == RTTI_VAR_CLASS_GLOBAL else 'locals'
