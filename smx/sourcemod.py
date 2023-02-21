@@ -1,13 +1,14 @@
-from __future__ import division
+from __future__ import annotations
 
+import ctypes
 import logging
 import re
 import time
-from ctypes import *
+from ctypes import c_float, c_int, c_long, pointer
 from functools import wraps
 
+from smx.definitions import cell, ucell
 from smx.engine import engine_time
-from smx.definitions import *
 from smx.exceptions import SourcePawnStringFormatError
 from smx.struct import cast_value
 
@@ -387,7 +388,15 @@ def native(f, *types):
 
 
 class ConVar:
-    def __init__(self, name, default_value, description='', flags=0, min=None, max=None):
+    def __init__(
+        self,
+        name: str,
+        default_value: str,
+        description: str = '',
+        flags: int = 0,
+        min: float | None = None,
+        max: float | None = None
+    ):
         self.name = name
         self.value = self.default_value = default_value
         self.description = description
@@ -403,10 +412,10 @@ class ConVar:
 
 
 class SourceModNatives:
-    def __init__(self, sys):
+    def __init__(self, sys: SourceModSystem):
         """
-        @type   sys: smx.sourcemod.SourceModSystem
-        @param  sys: The SourceMod system emulator owning these natives
+        :param sys:
+            The SourceMod system emulator owning these natives
         """
         self.sys = sys
         self.amx = self.sys.amx
