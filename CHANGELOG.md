@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 
 ## [Unreleased]
+
+
+## [0.1.0] — 2023-02-21
 ### BREAKING
  - Drop support for end-of-life Python versions — minimum supported Python version is now 3.7
  - Drop support for ASM verification, as the compiler no longer outputs the bytecode assembly

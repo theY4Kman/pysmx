@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pysmx"
-version = "0.0.2"
+version = "0.1.0"
 description = "Interact with SourceMod plug-ins"
 authors = ["Zach Kanzler <they4kman@gmail.com>"]
 license = "MIT"
