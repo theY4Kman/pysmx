@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 
 ## [Unreleased]
+### Fixed
+ - Remove dead references to `six` library
+ - Actually show compiler output on error
 
 
 ## [0.1.0] — 2023-02-21

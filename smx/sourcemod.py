@@ -6,8 +6,6 @@ import time
 from ctypes import *
 from functools import wraps
 
-import six
-
 from smx.engine import engine_time
 from smx.definitions import *
 from smx.exceptions import SourcePawnStringFormatError
@@ -364,7 +362,7 @@ def native(f, *types):
             # ...
     """
     interpret = False
-    if isinstance(f, six.string_types):
+    if isinstance(f, str):
         types = (f,) + types
         interpret = True
         f = None
