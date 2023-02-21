@@ -8,7 +8,7 @@ from typing import Tuple, List
 import construct as cs
 from construct_typed import csfield
 
-from smx.struct import ConStruct
+from smx.struct import Struct
 
 
 SPFILE_MAGIC = 0x53504646
@@ -73,14 +73,14 @@ ucell = ctypes.c_uint32
 cell = ctypes.c_int32
 
 
-class SPFileSection(ConStruct):
+class SPFileSection(Struct):
     """File section header format."""
     nameoffs: int = csfield(cs.Int32ul)  # Relative offset into global string table
     dataoffs: int = csfield(cs.Int32ul)  # Offset into the data section of the file
     size: int = csfield(cs.Int32ul)      # Size of the section's entry in the data section
 
 
-class SPFileHdr(ConStruct):
+class SPFileHdr(Struct):
     """File header format.  If compression is 0, then disksize may be 0
     to mean that only the imagesize is needed."""
     magic: int = csfield(cs.Int32ul)         # Magic number
@@ -93,7 +93,7 @@ class SPFileHdr(ConStruct):
     dataoffs: int = csfield(cs.Int32ul)      # Offset to file proper (any compression starts here)
 
 
-class SPFileCode(ConStruct):
+class SPFileCode(Struct):
     """File-encoded format of the ".code" section."""
     codesize: int = csfield(cs.Int32ul)    # Codesize in bytes
     cellsize: int = csfield(cs.Int8ul)     # Cellsize in bytes
@@ -103,37 +103,37 @@ class SPFileCode(ConStruct):
     code: int = csfield(cs.Int32ul)        # Relative offset to code
 
 
-class SPFileData(ConStruct):
+class SPFileData(Struct):
     """File-encoded format of the ".data" section."""
     datasize: int = csfield(cs.Int32ul)  # Size of data section in memory
     memsize: int = csfield(cs.Int32ul)   # Total mem required (includes data)
     data: int = csfield(cs.Int32ul)      # File offset to data (helper)
 
 
-class SPFilePublics(ConStruct):
+class SPFilePublics(Struct):
     """File-encoded format of the ".publics" section."""
     address: int = csfield(cs.Int32ul)  # Address relative to code section
     name: int = csfield(cs.Int32ul)     # Index into nametable
 
 
-class SPFileNatives(ConStruct):
+class SPFileNatives(Struct):
     """File-encoded format of the ".natives" section."""
     name: int = csfield(cs.Int32ul)  # Index into nametable
 
 
-class SPFilePubvars(ConStruct):
+class SPFilePubvars(Struct):
     """File-encoded format of the ".pubvars" section."""
     address: int = csfield(cs.Int32ul)  # Address relative to the DAT section
     name: int = csfield(cs.Int32ul)     # Index into nametable
 
 
-class SPFileTag(ConStruct):
+class SPFileTag(Struct):
     """File-encoded format of the ".tags" section."""
     tag_id: int = csfield(cs.Int32ul)  # Tag ID from compiler
     name: int = csfield(cs.Int32ul)    # Index into nametable
 
 
-class SPFdbgInfo(ConStruct):
+class SPFdbgInfo(Struct):
     """File-encoded debug information table."""
     num_files: int = csfield(cs.Int32ul)   # number of files
     num_lines: int = csfield(cs.Int32ul)   # number of lines
@@ -141,19 +141,25 @@ class SPFdbgInfo(ConStruct):
     num_arrays: int = csfield(cs.Int32ul)  # number of symbols which are arrays
 
 
-class SPFdbgFile(ConStruct):
+class SPFdbgFile(Struct):
     """File-encoded debug file table."""
     addr: int = csfield(cs.Int32ul)  # Address into code
     name: int = csfield(cs.Int32ul)  # Offset into debug nametable
 
 
-class SPFdbgLine(ConStruct):
+class SPFdbgLine(Struct):
     """File-encoded debug line table."""
     addr: int = csfield(cs.Int32ul)  # Address into code
     line: int = csfield(cs.Int32ul)  # Line number
 
 
-class SPFdbgSymbol(ConStruct):
+class SPFdbgArrayDim(Struct):
+    """File-encoded debug array dimension information."""
+    tagid: int = csfield(cs.Int16ul)  # Tag id
+    size: int = csfield(cs.Int32ul)   # Size of dimension
+
+
+class SPFdbgSymbol(Struct):
     """File-encoded debug symbol information."""
     addr: int = csfield(cs.Int32ul)        # Address rel to DAT or stack frame
     tagid: int = csfield(cs.Int16ul)       # Tag id
@@ -164,14 +170,10 @@ class SPFdbgSymbol(ConStruct):
     dimcount: int = csfield(cs.Int16ul)    # Dimension count (for arrays)
     name: int = csfield(cs.Int32ul)        # Offset into debug nametable
 
-
-class SPFdbgArrayDim(ConStruct):
-    """File-encoded debug array dimension information."""
-    tagid: int = csfield(cs.Int16ul)  # Tag id
-    size: int = csfield(cs.Int32ul)   # Size of dimension
+    dims: List[SPFdbgArrayDim] = csfield(SPFdbgArrayDim[cs.this.dimcount])
 
 
-class SPFdbgNtvArg(ConStruct):
+class SPFdbgNtvArg(Struct):
     """An argument of a .dbg.natives entry
 
     Each is followed by an SPFdbgArrayDim (sp_fdbg_arraydim_t) for each dimcount.
@@ -184,7 +186,7 @@ class SPFdbgNtvArg(ConStruct):
     dims: List[SPFdbgArrayDim] = csfield(SPFdbgArrayDim[cs.this.dimcount])
 
 
-class SPFdbgNative(ConStruct):
+class SPFdbgNative(Struct):
     """An entry in the .dbg.natives section.
 
     Each is followed by an SPFdbgNtvArg (sp_fdbg_ntvarg_t) for each argument.
@@ -197,7 +199,7 @@ class SPFdbgNative(ConStruct):
     args: List[SPFdbgNtvArg] = csfield(SPFdbgNtvArg[cs.this.nargs])
 
 
-class SPFdbgNtvTab(ConStruct):
+class SPFdbgNtvTab(Struct):
     """Header for the ".dbg.natives" section.
 
     It is followed by a number of SPFdbgNative (sp_fdbg_native_t) entries.
@@ -206,14 +208,14 @@ class SPFdbgNtvTab(ConStruct):
     natives: List[SPFdbgNative] = csfield(SPFdbgNative[cs.this.num_entries])
 
 
-class SmxRTTITableHeader(ConStruct):
+class SmxRTTITableHeader(Struct):
     """All row-based RTTI tables have this layout."""
     header_size: int = csfield(cs.Int32ul)  # Size of the header; row data is immediately after.
     row_size: int = csfield(cs.Int32ul)     # Size of each row in the table.
     row_count: int = csfield(cs.Int32ul)    # Number of elements in the table.
 
 
-class SmxRTTIEnum(ConStruct):
+class SmxRTTIEnum(Struct):
     """An entry in the rtti.enums table"""
     name: int = csfield(cs.Int32ul)  # Index into the names table.
 
@@ -223,13 +225,13 @@ class SmxRTTIEnum(ConStruct):
     reserved2: int = csfield(cs.Int32ul)
 
 
-class SmxRTTIEnumTable(ConStruct):
+class SmxRTTIEnumTable(Struct):
     """The rtti.enums table."""
     header: SmxRTTITableHeader = csfield(SmxRTTITableHeader.as_struct())
     enums: List[SmxRTTIEnum] = csfield(SmxRTTIEnum[cs.this.header.row_count])
 
 
-class SmxRTTIMethod(ConStruct):
+class SmxRTTIMethod(Struct):
     """An entry in the rtti.methods table"""
     # Index into the name table.
     name: int = csfield(cs.Int32ul)
@@ -249,13 +251,13 @@ class SmxRTTIMethod(ConStruct):
     signature: int = csfield(cs.Int32ul)
 
 
-class SmxRTTIMethodTable(ConStruct):
+class SmxRTTIMethodTable(Struct):
     """The rtti.methods table."""
     header: SmxRTTITableHeader = csfield(SmxRTTITableHeader.as_struct())
     methods: List[SmxRTTIMethod] = csfield(SmxRTTIMethod[cs.this.header.row_count])
 
 
-class SmxRTTINative(ConStruct):
+class SmxRTTINative(Struct):
     """An entry in the rtti.natives table
 
     The rows must be identical to the native table mapping.
@@ -267,13 +269,13 @@ class SmxRTTINative(ConStruct):
     signature: int = csfield(cs.Int32ul)
 
 
-class SmxRTTINativeTable(ConStruct):
+class SmxRTTINativeTable(Struct):
     """The rtti.natives table."""
     header: SmxRTTITableHeader = csfield(SmxRTTITableHeader.as_struct())
     natives: List[SmxRTTINative] = csfield(SmxRTTINative[cs.this.header.row_count])
 
 
-class SmxRTTITypedef(ConStruct):
+class SmxRTTITypedef(Struct):
     """An entry in the rtti.typedefs table"""
     # Index into the name table.
     name: int = csfield(cs.Int32ul)
@@ -283,13 +285,13 @@ class SmxRTTITypedef(ConStruct):
     type_id: int = csfield(cs.Int32ul)
 
 
-class SmxRTTITypedefTable(ConStruct):
+class SmxRTTITypedefTable(Struct):
     """The rtti.typedefs table."""
     header: SmxRTTITableHeader = csfield(SmxRTTITableHeader.as_struct())
     typedefs: List[SmxRTTITypedef] = csfield(SmxRTTITypedef[cs.this.header.row_count])
 
 
-class SmxRTTITypeset(ConStruct):
+class SmxRTTITypeset(Struct):
     """An entry in the rtti.typesets table"""
     # Index into the name table.
     name: int = csfield(cs.Int32ul)
@@ -300,13 +302,13 @@ class SmxRTTITypeset(ConStruct):
     signature: int = csfield(cs.Int32ul)
 
 
-class SmxRTTITypesetTable(ConStruct):
+class SmxRTTITypesetTable(Struct):
     """The rtti.typesets table."""
     header: SmxRTTITableHeader = csfield(SmxRTTITableHeader.as_struct())
     typesets: List[SmxRTTITypeset] = csfield(SmxRTTITypeset[cs.this.header.row_count])
 
 
-class SmxRTTIEnumStruct(ConStruct):
+class SmxRTTIEnumStruct(Struct):
     """An entry in the rtti.enumstructs table"""
     # Index into the name table.
     name: int = csfield(cs.Int32ul)
@@ -320,13 +322,13 @@ class SmxRTTIEnumStruct(ConStruct):
     size: int = csfield(cs.Int32ul)
 
 
-class SmxRTTIEnumStructTable(ConStruct):
+class SmxRTTIEnumStructTable(Struct):
     """The rtti.enumstructs table."""
     header: SmxRTTITableHeader = csfield(SmxRTTITableHeader.as_struct())
     enumstructs: List[SmxRTTIEnumStruct] = csfield(SmxRTTIEnumStruct[cs.this.header.row_count])
 
 
-class SmxRTTIEnumStructField(ConStruct):
+class SmxRTTIEnumStructField(Struct):
     """An entry in the rtti.es_fields table"""
     # Index into the name table.
     name: int = csfield(cs.Int32ul)
@@ -338,13 +340,13 @@ class SmxRTTIEnumStructField(ConStruct):
     offset: int = csfield(cs.Int32ul)
 
 
-class SmxRTTIEnumStructFieldTable(ConStruct):
+class SmxRTTIEnumStructFieldTable(Struct):
     """The rtti.es_fields table."""
     header: SmxRTTITableHeader = csfield(SmxRTTITableHeader.as_struct())
     fields: List[SmxRTTIEnumStructField] = csfield(SmxRTTIEnumStructField[cs.this.header.row_count])
 
 
-class SmxRTTIClassDef(ConStruct):
+class SmxRTTIClassDef(Struct):
     """An entry in the rtti.classdef table"""
     # Bits 0-1 indicate the definition type.
     flags: int = csfield(cs.Int32ul)
@@ -363,13 +365,13 @@ class SmxRTTIClassDef(ConStruct):
     reserved3: int = csfield(cs.Int32ul)
 
 
-class SmxRTTIClassDefTable(ConStruct):
+class SmxRTTIClassDefTable(Struct):
     """The rtti.classdef table."""
     header: SmxRTTITableHeader = csfield(SmxRTTITableHeader.as_struct())
     classdefs: List[SmxRTTIClassDef] = csfield(SmxRTTIClassDef[cs.this.header.row_count])
 
 
-class SmxRTTIField(ConStruct):
+class SmxRTTIField(Struct):
     """An entry in the rtti.fields table"""
     # Currently 0.
     flags: int = csfield(cs.Int16ul)
@@ -381,7 +383,7 @@ class SmxRTTIField(ConStruct):
     type_id: int = csfield(cs.Int32ul)
 
 
-class SmxRTTIFieldTable(ConStruct):
+class SmxRTTIFieldTable(Struct):
     """The rtti.fields table."""
     header: SmxRTTITableHeader = csfield(SmxRTTITableHeader.as_struct())
     fields: List[SmxRTTIField] = csfield(SmxRTTIField[cs.this.header.row_count])
@@ -492,7 +494,7 @@ RTTI_CB_INDEXED_TYPES = {
 #
 
 
-class SmxRTTIDebugMethod(ConStruct):
+class SmxRTTIDebugMethod(Struct):
     """An entry in the rtti.debug_methods table
 
     This table describes how to find local variable debug info.
@@ -507,13 +509,13 @@ class SmxRTTIDebugMethod(ConStruct):
     first_local: int = csfield(cs.Int32ul)
 
 
-class SmxRTTIDebugMethodTable(ConStruct):
+class SmxRTTIDebugMethodTable(Struct):
     """A table of rtti.debug_methods entries"""
     header: SmxRTTITableHeader = csfield(SmxRTTITableHeader.as_struct())
     methods: List[SmxRTTIDebugMethod] = csfield(SmxRTTIDebugMethod[cs.this.header.row_count])
 
 
-class SmxRTTIDebugVar(ConStruct):
+class SmxRTTIDebugVar(Struct):
     """An entry in the rtti.debug_locals or rtti.debug_globals table"""
     # Address, the meaning of which depends on the pcode version and method
     # scope (local, static, global).
@@ -533,7 +535,7 @@ class SmxRTTIDebugVar(ConStruct):
     type_id: int = csfield(cs.Int32ul)
 
 
-class SmxRTTIDebugVarTable(ConStruct):
+class SmxRTTIDebugVarTable(Struct):
     """A table of rtti.debug_locals or rtti.debug_globals table entries"""
     header: SmxRTTITableHeader = csfield(SmxRTTITableHeader.as_struct())
     vars: List[SmxRTTIDebugVar] = csfield(SmxRTTIDebugVar[cs.this.header.row_count])
@@ -563,7 +565,7 @@ def rtti_decode_uint32(data: bytes, offset: int) -> Tuple[int, int]:
     return value, offset
 
 
-class Myinfo(ConStruct):
+class Myinfo(Struct):
     name: int = csfield(cs.Int32ul)
     description: int = csfield(cs.Int32ul)
     author: int = csfield(cs.Int32ul)
