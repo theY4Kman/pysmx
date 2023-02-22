@@ -14,6 +14,7 @@ include = [
     "smx/include/*.inc",
     "smx/spcomp/spcomp.*",
     { path = "CHANGELOG.md", format = "sdist" },
+    { path = "test/game_root/*", format = "sdist" },
 ]
 
 [tool.poetry.dependencies]

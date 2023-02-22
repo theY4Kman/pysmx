@@ -1,4 +1,5 @@
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -27,18 +28,25 @@ def myinfo_sp(myinfo) -> str:
     return defn
 
 
+@pytest.fixture(scope='session')
+def plugin_root_path() -> Path:
+    return Path(__file__).parent / 'game_root/addons/sourcemod'
+
+
 @pytest.fixture
-def compile(myinfo_sp):
+def compile(myinfo_sp, plugin_root_path):
     def compile(source, *, include_myinfo: bool = True, **options):
         if include_myinfo:
             source = f'{myinfo_sp}\n\n{source}'
         plugin = smx.compiler.compile(source, **options)
+        plugin.runtime.root_path = plugin_root_path
         return plugin
     return compile
 
 
 @pytest.mark.parametrize('value', [True, False])
 def test_bool_literal_return(value, compile):
+    # language=SourcePawn
     plugin = compile('''
         public bool:Test() {
             return %s;
@@ -55,6 +63,7 @@ def test_bool_literal_return(value, compile):
     -2147483648,
 ])
 def test_integer_literal_return(integer, compile):
+    # language=SourcePawn
     plugin = compile('''
         public Test() {
             return %d;
@@ -64,6 +73,7 @@ def test_integer_literal_return(integer, compile):
 
 
 def test_float_literal_return(compile):
+    # language=SourcePawn
     plugin = compile('''
         public Float:Test() {
             return 12.0;
@@ -75,6 +85,7 @@ def test_float_literal_return(compile):
 
 
 def test_string_return(compile):
+    # language=SourcePawn
     plugin = compile('''
         String:Test() {
             new String:s[] = "hiss";
@@ -89,6 +100,7 @@ def test_string_return(compile):
 
 
 def test_function_calling(compile):
+    # language=SourcePawn
     plugin = compile("""
         public OnPluginStart()
         {
@@ -115,6 +127,7 @@ def test_function_calling(compile):
 
 
 def test_interpreter(compile):
+    # language=SourcePawn
     plugin = compile("""
         #include <sourcemod>
 
@@ -167,6 +180,7 @@ def test_interpreter(compile):
 
 
 def test_convar_int(compile):
+    # language=SourcePawn
     plugin = compile('''
         new Handle:g_cvar = INVALID_HANDLE;
         public TestCreateConVar() {
@@ -183,6 +197,7 @@ def test_convar_int(compile):
 
 
 def test_convar_float(compile):
+    # language=SourcePawn
     plugin = compile('''
         new Handle:g_cvar = INVALID_HANDLE;
         public TestCreateConVar() {
@@ -199,6 +214,7 @@ def test_convar_float(compile):
 
 
 def test_convar_string(compile):
+    # language=SourcePawn
     plugin = compile('''
         new Handle:g_cvar = INVALID_HANDLE;
         public TestCreateConVar() {
@@ -217,3 +233,46 @@ def test_convar_string(compile):
     plugin.runtime.call_function_by_name('TestCreateConVar')
     value = plugin.runtime.call_function_by_name('TestGetConVar')
     assert value == 'Unique'
+
+
+def test_file_reading(compile):
+    # language=SourcePawn
+    plugin = compile('''
+        new File:g_file;
+        String:ReadLine() {
+            new String:buffer[256];
+
+            if (!g_file) {
+                BuildPath(Path_SM, buffer, sizeof(buffer), "text_file.txt");
+                g_file = OpenFile(buffer, "rt");
+
+                if (!g_file) {
+                    PrintToServer("Failed to open file!");
+                    return buffer;
+                }
+            }
+
+            g_file.ReadLine(buffer, sizeof(buffer));
+            return buffer;
+        }
+        public DontOptimizeOutReadLine() {
+            ReadLine();
+        }
+    ''')
+
+    read_line = plugin.runtime.get_function_by_name('ReadLine')
+
+    lines = []
+    while True:
+        line = read_line()
+        if not line:
+            break
+        lines.append(line)
+
+    expected = [
+        'line 1\n',
+        'line 2\n',
+        'line 3\n',
+    ]
+    actual = lines
+    assert expected == actual

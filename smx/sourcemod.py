@@ -317,13 +317,17 @@ class WritableString:
     def read(self) -> str:
         return self.natives.amx._local_to_string(self.string_offs)
 
-    def write(self, s: str | bytes):
+    def write(self, s: str | bytes, *, null_terminate: bool = False):
         if not isinstance(s, bytes):
             s = s.encode('utf8')
 
-        num_bytes = min(len(s), self.max_length)
+        num_bytes = num_bytes_written = min(len(s), self.max_length)
+        if null_terminate:
+            s += b'\0'
+            num_bytes = min(len(s), self.max_length)
+
         self.natives.amx._writeheap(self.string_offs, ctypes.create_string_buffer(s, num_bytes))
-        return num_bytes
+        return num_bytes_written
 
 
 NativeParamType = Literal['cell', 'bool', 'float', 'string', 'writable_string', 'handle', '...']
@@ -472,7 +476,7 @@ class MethodMap(SourceModNativesMixin):
         if instance is None:
             return self
 
-        if self.__name__ not in instance.__dict__:
+        if self._name not in instance.__dict__:
             # TODO(zk): less ugly?
             method_map = self.__class__()
             method_map.amx = instance.amx
@@ -507,16 +511,15 @@ class ConVarNatives(SourceModNativesMixin):
         return sp_ftoc(float(cvar.value))
 
     @native('handle', 'writable_string')
-    def GetConVarString(self, cvar, buf):
-        return buf.write(cvar.value + '\0')
+    def GetConVarString(self, cvar: ConVar, buf: WritableString):
+        return buf.write(cvar.value, null_terminate=True)
 
 
 class FileMethodMap(MethodMap):
-    @native('handle', 'writeable_string', 'cell')
-    def ReadLine(self, file: File, buf: WritableString, maxlength: int):
+    @native('handle', 'writable_string')
+    def ReadLine(self, file: File, buf: WritableString):
         line = file.fp.readline()
-        # TODO(zk): null terminators?!?!
-        return buf.write(line)
+        return buf.write(line, null_terminate=True)
 
     @native('handle')
     def EndOfFile(self, file: File):
@@ -537,8 +540,7 @@ class FileNatives(SourceModNativesMixin):
 
         suffix = atcprintf(self.amx, fmt, args, 0)
         path = str(self.runtime.root_path / suffix)
-        # TODO(zk): proper handling of null terminators
-        return buffer.write(path + '\0') - 1
+        return buffer.write(path, null_terminate=True)
 
     @native('string', 'string', 'bool', 'string')
     def OpenFile(self, file: str, mode: str, use_valve_fs: bool = False, valve_path_id: str = 'GAME'):
@@ -585,7 +587,7 @@ class StringNatives(SourceModNativesMixin):
 
     @native('writable_string')
     def TrimString(self, string: WritableString) -> int:
-        return string.write(string.read().strip() + '\0')
+        return string.write(string.read().strip(), null_terminate=True)
 
 
 class TimerNatives(SourceModNativesMixin):
