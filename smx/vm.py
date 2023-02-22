@@ -5,6 +5,7 @@ import struct
 import sys
 from ctypes import *
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Tuple, TYPE_CHECKING, TypeVar
 
 from smx.definitions import cell, ucell
@@ -92,7 +93,11 @@ class SourcePawnAbstractMachine:
         # TODO(zk): use memoryview to prevent copying
         self.data = self.plugin.base[self.DAT:][:self.plugin.datasize]
         self.code = self.plugin.base[self.COD:][:self.plugin.pcode.size]
-        self.heap = (c_byte * (self.plugin.memsize - self.plugin.datasize))()
+
+        self.heap = (c_byte * self.plugin.memsize)()
+        memmove(self.heap, self.data, self.plugin.datasize)
+        # XXX(zk): is this necessary? does ctypes automatically zero out requested memory?
+        memset(addressof(self.heap) + self.plugin.datasize, 0, self.plugin.memsize - self.plugin.datasize)
 
         self.STP = len(self.heap)
         self.STK = self.STP
@@ -151,6 +156,9 @@ class SourcePawnAbstractMachine:
 
     def _getdatashort(self, offset):
         return struct.unpack('<h', self.data[offset:offset+sizeof(c_int16)])[0]
+
+    def _getheapstring(self, offset) -> str:
+        return c_char_p(addressof(self.heap) + offset).value.decode('utf-8')
 
     def _local_to_string(self, addr):
         return self.plugin._get_data_string(addr)
@@ -353,12 +361,13 @@ class PluginFunction:
 class SourcePawnPluginRuntime:
     """Executes SourcePawn plug-ins"""
 
-    def __init__(self, plugin: SourcePawnPlugin):
+    def __init__(self, plugin: SourcePawnPlugin, *, root_path: str | Path | None = None):
         """
         :param plugin:
             Plug-in object to envelop a runtime context around
         """
         self.plugin = plugin
+        self.root_path = Path(root_path or '.').resolve()
 
         self.amx = SourcePawnAbstractMachine(self, self.plugin)
 

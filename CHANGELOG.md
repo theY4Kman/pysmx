@@ -10,10 +10,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
  - Read all RTTI sections
  - Expand RTTI value interpretation and string formatting
  - Add `spew` param to emit all executed instructions and their params
+ - Add basic `files.inc` natives (`BuildPath`, `OpenFile`, `File.ReadLine`, `File.EndOfFile`)
 
 ### Fixed
  - Resolve broken function RTTI parsing
  - Prevent error when encountering unknown RTTI control bytes
+ - Resolve natives reading strings from wrong address
 
 
 ## [0.1.1] — 2023-02-21

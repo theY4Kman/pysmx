@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 import ctypes
+import io
 import logging
+import os
 import re
 import struct
 import time
 from ctypes import c_float, c_int, c_long, pointer
+from enum import IntEnum
 from functools import wraps
+from typing import Any, Callable, Dict, Literal, Sequence, Type, TYPE_CHECKING
 
 from smx.definitions import cell, ucell
 from smx.engine import engine_time
 from smx.exceptions import SourcePawnStringFormatError
 from smx.struct import cast_value
+
+if TYPE_CHECKING:
+    from smx.vm import SourcePawnAbstractMachine, SourcePawnPluginRuntime
 
 __all__ = ['SourceModNatives', 'SourceModSystem']
 
@@ -128,7 +135,7 @@ def isformatfunc(f):
 class PrintfFormatter:
     def __init__(self):
         # A mapping of format characters to their format functions
-        self.format_chars = { }
+        self.format_chars = {}
 
         for obj in map(lambda n: getattr(self, n), dir(self)):
             if isformatfunc(obj):
@@ -141,8 +148,8 @@ class PrintfFormatter:
 
     @formatfunc('.', incr=False)
     def precision(self, ch, state):
-        state.i += 1 # Eat the period
-        prec,chars = atoi(state.fmt[state.i:], length=True)
+        state.i += 1  # Eat the period
+        prec, chars = atoi(state.fmt[state.i:], length=True)
         state.precision = None if prec < 0 else prec
         state.i += chars
         state.sz_format += '.' + str(prec)
@@ -304,60 +311,76 @@ class WritableString:
         self.string_offs = string_offs
         self.max_length = max_length
 
-    def write(self, s):
-        # +1 for null terminator
-        num_chars = min(len(s) + 1, self.max_length)
-        self.natives.amx._writeheap(self.string_offs, ctypes.create_string_buffer(s.encode('utf8') + b'\0', num_chars))
-        return num_chars
+    def __str__(self):
+        return self.read()
+
+    def read(self) -> str:
+        return self.natives.amx._local_to_string(self.string_offs)
+
+    def write(self, s: str | bytes):
+        if not isinstance(s, bytes):
+            s = s.encode('utf8')
+
+        num_bytes = min(len(s), self.max_length)
+        self.natives.amx._writeheap(self.string_offs, ctypes.create_string_buffer(s, num_bytes))
+        return num_bytes
 
 
-def interpret_params(natives, params, *types):
+NativeParamType = Literal['cell', 'bool', 'float', 'string', 'writable_string', 'handle', '...']
+
+
+def interpret_params(natives: SourceModNatives, params: Sequence[int], *param_types: NativeParamType):
     """Convert VM params into native Python types
 
     Supported types:
      - cell: for integers (or "any:" tag)
      - bool: a cell cast to boolean
      - float: floating point numbers
-     - string: dereferenced pointer into DATA containing a string
+     - string: dereferenced pointer into DAT/heap containing a string
      - writable_string: eats two params (String:s, maxlength) and returns a
             special object with a .write('string') method, for writing strings
             back to the plugin.
      - handle: a handle ID dereferenced to its backing object
-
-    TODO: varargs
+     - ...: variadic params, interpreted as cells
 
     :param natives: SourceModNatives instance
     :type natives: SourceModNatives
     :param params: Iterable of params from the VM
-    :param types: list of strings describing how to interpret params
+    :param param_types: list of strings describing how to interpret params
     """
     num_params = params[0]
     args = params[1:1 + num_params]
     i = 0
-    for type in types:
+    for param_type in param_types:
+        if param_type == '...':
+            remaining_params = args[i:]
+            yield len(remaining_params)
+            yield from remaining_params
+            return
+
         arg = args[i]
-        if type == 'cell' or type is None:
+        if param_type == 'cell' or param_type is None:
             yield arg
-        elif type == 'bool':
+        elif param_type == 'bool':
             yield bool(arg)
-        elif type == 'float':
+        elif param_type == 'float':
             yield sp_ctof(arg)
-        elif type == 'string':
-            yield natives.amx._local_to_string(arg)
-        elif type == 'writable_string':
+        elif param_type == 'string':
+            yield natives.amx._getheapstring(arg)
+        elif param_type == 'writable_string':
             s = arg
             i += 1
             maxlen = args[i]
             yield WritableString(natives, s, maxlen)
-        elif type == 'handle':
+        elif param_type == 'handle':
             yield natives.sys.handles[arg]
         else:
-            raise ValueError('Unsupported param type %s' % type)
+            raise ValueError('Unsupported param type %s' % param_type)
 
         i += 1
 
 
-def native(f, *types):
+def native(f: Callable[..., Any] | NativeParamType, *types: NativeParamType):
     """Labels a function/method as a native
 
     Optionally, takes a list of param types to automatically perform parameter
@@ -416,31 +439,156 @@ class ConVar:
         return '<ConVar %s %r>' % (self.name, self.value)
 
 
-class SourceModNatives:
-    def __init__(self, sys: SourceModSystem):
-        """
-        :param sys:
-            The SourceMod system emulator owning these natives
-        """
-        self.sys = sys
-        self.amx = self.sys.amx
-        self.runtime = self.amx.plugin.runtime
+class File:
+    def __init__(self, fp: io.FileIO):
+        self.fp = fp
+        # XXX(zk): surely this will bite me in the ass
+        self.size = os.fstat(fp.fileno()).st_size
 
-    def printf(self, msg):
-        return self.runtime.printf(msg)
+    def is_eof(self) -> bool:
+        return self.fp.tell() == self.size
 
-    def get_native(self, funcname):
-        if hasattr(self, funcname):
-            func = getattr(self, funcname)
-            if callable(func) and getattr(func, 'is_native', False):
-                return func
 
+class SourceModNativesMixin:
+    sys: SourceModSystem
+    amx: SourcePawnAbstractMachine
+    runtime: SourcePawnPluginRuntime
+
+
+class _MethodMapDescriptor:
+    def __init__(self, method_map: Type[MethodMap]):
+        self.method_map = method_map
+
+
+class MethodMap(SourceModNativesMixin):
+    def __init__(self):
+        self._name: str | None = None
+
+    def __set_name__(self, owner, name):
+        # XXX(zk): individual, per-instance names?
+        self._name = name
+
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self
+
+        if self.__name__ not in instance.__dict__:
+            # TODO(zk): less ugly?
+            method_map = self.__class__()
+            method_map.amx = instance.amx
+            method_map.sys = instance.sys
+            method_map.runtime = instance.runtime
+            instance.__dict__[self._name] = method_map
+
+        return instance.__dict__[self._name]
+
+
+class ConsoleNatives(SourceModNativesMixin):
     @native
     def PrintToServer(self, params):
         fmt = self.amx._local_to_string(params[1])
         out = atcprintf(self.amx, fmt, params, 2)
-        self.printf(out)
+        self.runtime.printf(out)
 
+
+class ConVarNatives(SourceModNativesMixin):
+    @native('string', 'string', 'string', 'cell', 'bool', 'float', 'bool', 'float')
+    def CreateConVar(self, name, default_value, description, flags, has_min, min, has_max, max):
+        cvar = ConVar(name, default_value, description, flags, min if has_min else None, max if has_max else None)
+        self.sys.convars[name] = cvar
+        return self.sys.handles.new_handle(cvar)
+
+    @native('handle')
+    def GetConVarInt(self, cvar):
+        return int(cvar.value)
+
+    @native('handle')
+    def GetConVarFloat(self, cvar):
+        return sp_ftoc(float(cvar.value))
+
+    @native('handle', 'writable_string')
+    def GetConVarString(self, cvar, buf):
+        return buf.write(cvar.value + '\0')
+
+
+class FileMethodMap(MethodMap):
+    @native('handle', 'writeable_string', 'cell')
+    def ReadLine(self, file: File, buf: WritableString, maxlength: int):
+        line = file.fp.readline()
+        # TODO(zk): null terminators?!?!
+        return buf.write(line)
+
+    @native('handle')
+    def EndOfFile(self, file: File):
+        return file.is_eof()
+
+
+class PathType(IntEnum):
+    PATH_SM = 0
+
+
+class FileNatives(SourceModNativesMixin):
+    File = FileMethodMap()
+
+    @native('cell', 'writable_string', 'string', '...')
+    def BuildPath(self, path_type: PathType, buffer: WritableString, fmt: str, *args):
+        if path_type != PathType.PATH_SM:
+            raise ValueError('Unsupported path type %s' % path_type)
+
+        suffix = atcprintf(self.amx, fmt, args, 0)
+        path = str(self.runtime.root_path / suffix)
+        # TODO(zk): proper handling of null terminators
+        return buffer.write(path + '\0') - 1
+
+    @native('string', 'string', 'bool', 'string')
+    def OpenFile(self, file: str, mode: str, use_valve_fs: bool = False, valve_path_id: str = 'GAME'):
+        if use_valve_fs:
+            # TODO(zk)
+            raise NotImplementedError('Valve FS not implemented')
+
+        fp = open(file, mode)
+        return self.sys.handles.new_handle(File(fp), on_close=fp.close)
+
+
+class StringNatives(SourceModNativesMixin):
+    @native('string')
+    def strlen(self, string: str) -> int:
+        return len(string)
+
+    @native('string', 'string', 'bool')
+    def StrContains(self, string: str, substr: str, case_sensitive: bool = True) -> int:
+        if not case_sensitive:
+            string = string.lower()
+            substr = substr.lower()
+
+        return string.find(substr)
+
+    def _strcmp(self, str1: str, str2: str, case_sensitive: bool = True) -> int:
+        if not case_sensitive:
+            str1 = str1.lower()
+            str2 = str2.lower()
+
+        return (str1 > str2) - (str1 < str2)
+
+    @native('string', 'string', 'bool')
+    def strcmp(self, str1: str, str2: str, case_sensitive: bool = True) -> int:
+        return self._strcmp(str1, str2, case_sensitive)
+
+    @native('string', 'string', 'cell', 'bool')
+    def strncmp(self, str1: str, str2: str, num: int, case_sensitive: bool = True) -> int:
+        return self._strcmp(str1[:num], str2[:num], case_sensitive)
+
+    @native('writable_string', 'string')
+    def strcopy(self, dest: WritableString, src: str) -> int:
+        # XXX(zk): surely this manual finagling of null terminator counts will be wrong due to SM idiosyncrasies
+        return dest.write(src + '\0') - 1
+
+    @native('writable_string')
+    def TrimString(self, string: WritableString) -> int:
+        return string.write(string.read().strip() + '\0')
+
+
+class TimerNatives(SourceModNativesMixin):
     @native('float', 'cell', 'cell', 'cell')
     def CreateTimer(self, interval, func, data, flags):
         """
@@ -458,23 +606,50 @@ class SourceModNatives:
         logger.info('Interval: %f, func: %d, data: %d, flags: %d' % (interval, func, data, flags))
         return self.sys.timers.create_timer(interval, func, data, flags)
 
-    @native('string', 'string', 'string', 'cell', 'bool', 'float', 'bool', 'float')
-    def CreateConVar(self, name, default_value, description, flags, has_min, min, has_max, max):
-        cvar = ConVar(name, default_value, description, flags, min if has_min else None, max if has_max else None)
-        self.sys.convars[name] = cvar
-        return self.sys.handles.new_handle(cvar)
 
-    @native('handle')
-    def GetConVarInt(self, cvar):
-        return int(cvar.value)
+class SourceModNatives(
+    ConsoleNatives,
+    ConVarNatives,
+    FileNatives,
+    StringNatives,
+    TimerNatives,
+):
+    def __init__(self, sys: SourceModSystem):
+        """
+        :param sys:
+            The SourceMod system emulator owning these natives
+        """
+        self.sys = sys
+        self.amx = self.sys.amx
+        self.runtime = self.amx.plugin.runtime
 
-    @native('handle')
-    def GetConVarFloat(self, cvar):
-        return sp_ftoc(float(cvar.value))
+    def get_native(self, qn: str) -> Callable[..., Any] | None:
+        parts = qn.split('.', maxsplit=1)
+        if len(parts) == 2:
+            methodmap_name, func_name = parts
+            methodmap = getattr(self, methodmap_name, None)
+            if not isinstance(methodmap, MethodMap):
+                return None
 
-    @native('handle', 'writable_string')
-    def GetConVarString(self, cvar, buf):
-        return buf.write(cvar.value)
+            root = methodmap
+        else:
+            func_name = qn
+            root = self
+
+        func = getattr(root, func_name, None)
+        if callable(func) and getattr(func, 'is_native', False):
+            return func
+
+
+class SourceModHandle:
+    def __init__(self, id: int, obj: Any, on_close: Callable[[], None] | None = None):
+        self.id = id
+        self.obj = obj
+        self.on_close = on_close
+
+    def close(self):
+        if self.on_close:
+            self.on_close()
 
 
 class SourceModHandles:
@@ -483,16 +658,21 @@ class SourceModHandles:
     def __init__(self, sys):
         self.sys = sys
         self._handle_counter = 0
-        self._handles = {}
-
-    def new_handle(self, obj):
-        self._handle_counter += 1
-        handle_id = self._handle_counter
-        self._handles[handle_id] = obj
-        return handle_id
+        self._handles: Dict[int, SourceModHandle] = {}
+        # TODO(zk): cloning support? ref counting?
 
     def __getitem__(self, handle_id):
-        return self._handles[handle_id]
+        return self._handles[handle_id].obj
+
+    def new_handle(self, obj, on_close: Callable[[], None] | None = None):
+        self._handle_counter += 1
+        handle_id = self._handle_counter
+        self._handles[handle_id] = SourceModHandle(handle_id, obj, on_close=on_close)
+        return handle_id
+
+    def close_handle(self, handle_id):
+        handle = self._handles.pop(handle_id)
+        handle.close()
 
 
 class SourceModTimers:
