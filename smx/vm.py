@@ -5,13 +5,10 @@ import struct
 import sys
 from ctypes import *
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Any, Dict, TypeVar, Tuple
+from typing import Any, Dict, List, Tuple, TYPE_CHECKING, TypeVar
 
-from smx.definitions import ucell, cell
-from smx.exceptions import (
-    SourcePawnPluginNativeError,
-    SourcePawnPluginError,
-)
+from smx.definitions import cell, ucell
+from smx.exceptions import SourcePawnPluginError, SourcePawnPluginNativeError
 from smx.opcodes import opcodes
 from smx.pawn import SMXInstructions
 from smx.sourcemod import SourceModSystem
@@ -83,6 +80,8 @@ class SourcePawnAbstractMachine:
 
         # The current instruction being executed
         self.instr = None
+        # Address of the current instruction being executed
+        self.instr_addr = None
         # Whether code is running (i.e. a halt instruction has not been encountered since execution start)
         self.halted = None
 
@@ -108,6 +107,7 @@ class SourcePawnAbstractMachine:
         self._instr_params = []
 
         self.instr = 0
+        self.instr_addr = 0
         self.halted = False
 
         self.initialized = True
@@ -137,7 +137,7 @@ class SourcePawnAbstractMachine:
         val, = struct.unpack('<l', self.data[offset:offset + sizeof(cell)])
         return val
 
-    def _getheapcell(self, offset):
+    def _getheapcell(self, offset: int):
         heap = cast(self.heap, POINTER(cell))
         heap_ptr = cast(pointer(heap), POINTER(c_void_p))
         heap_ptr.contents.value += offset
@@ -180,9 +180,6 @@ class SourcePawnAbstractMachine:
         if save:
             self._record_instr_param(param)
         return param
-
-    def _getparam_p(self):
-        return self._getparam()
 
     def _getparam_op(self):
         param = self.instr & 0xffff
@@ -305,21 +302,30 @@ class SourcePawnAbstractMachine:
         return rval
 
     def _step(self):
+        self.instr_addr = self.CIP
         c = self._instr()
         self.instr = c
         op = c & ((1 << sizeof(cell)*4)-1)
 
-        opname = opcodes[op]
-        self._instr_params = []
-        self._executed.append((opname, self._instr_params, None, None))
+        instr = opcodes[op]
+        params = instr.read_params(self)
 
-        if hasattr(self.instructions, opname):
-            op_handler = getattr(self.instructions, opname)
-            op_handler(self)
-        else:
+        self._instr_params = []
+        self._executed.append((instr.name, self._instr_params, None, None))
+
+        op_handler = getattr(self.instructions, instr.method, None)
+        if not op_handler:
             ######################
             # TODO: handle this intentionally
             logger.info(opcodes[op])
+            return
+
+        if self.plugin.spew:
+            # TODO(zk): use logger?
+            formatted_params = instr.format_params(self, params)
+            print(f'0x{self.instr_addr:08x}: {instr.name} {", ".join(formatted_params)}')
+
+        op_handler(self, *params)
 
 
 class PluginFunction:

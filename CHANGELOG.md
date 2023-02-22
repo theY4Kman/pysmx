@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Added
  - Read all RTTI sections
  - Expand RTTI value interpretation and string formatting
+ - Add `spew` param to emit all executed instructions and their params
 
 ### Fixed
  - Resolve broken function RTTI parsing

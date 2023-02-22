@@ -91,10 +91,9 @@ class _PluginChild:
         self.plugin = plugin
 
 
-class StringtableName(_PluginChild):
-    def __init__(self, plugin, name):
-        super(StringtableName, self).__init__(plugin)
-        self._name = name
+class StringtableNameMixin:
+    plugin: SourcePawnPlugin
+    _name: int
 
     @property
     def name(self):
@@ -104,7 +103,13 @@ class StringtableName(_PluginChild):
         return self.name
 
     def __repr__(self) -> str:
-        return f'<{self.__class__.__name__} {self.name}>'
+        return f'<{self.__class__.__name__} {self}>'
+
+
+class StringtableName(StringtableNameMixin, _PluginChild):
+    def __init__(self, plugin, name):
+        super(StringtableName, self).__init__(plugin)
+        self._name = name
 
 
 class PCode(_PluginChild):
@@ -204,7 +209,7 @@ class RTTITypedSymbol(TypedSymbol):
             return self.rtti.interpret_value(value, amx)
 
 
-class RTTINamedTypedSymbol(RTTITypedSymbol, StringtableName):
+class RTTINamedTypedSymbol(RTTITypedSymbol, StringtableNameMixin):
     def __str__(self) -> str:
         if self.rtti:
             return f'{self.name} :: {self.rtti}'
@@ -288,6 +293,10 @@ class _DbgChild:
 
     def __init__(self, debug: PluginDebug):
         self.debug = debug
+
+    @property
+    def plugin(self) -> SourcePawnPlugin:
+        return self.debug.plugin
 
 
 class DbgFile(_DbgChild):
@@ -378,7 +387,7 @@ class DbgSymbol(TypedSymbol, _DbgChild):
         return fmt.format(tag=tag, name=name, suffix=suffix)
 
 
-class RTTIDbgVar(TypedSymbol, _DbgChild):
+class RTTIDbgVar(RTTINamedTypedSymbol, StringtableNameMixin, _DbgChild):
     VCLASS_NAMES = {
         RTTI_VAR_CLASS_GLOBAL: 'global',
         RTTI_VAR_CLASS_LOCAL: 'local',
@@ -470,7 +479,9 @@ class PluginDebug(_PluginChild):
 
 
 class SourcePawnPlugin:
-    def __init__(self, filelike=None):
+    def __init__(self, filelike=None, *, spew: bool = False):
+        self.spew = spew
+
         self.name: str = '<unnamed>'
         self.debug: PluginDebug = PluginDebug(self)
         self.filled: bool = False
@@ -598,6 +609,7 @@ class SourcePawnPlugin:
 
         return RTTIParser(self, self.rtti_data, offset)
 
+    # TODO(zk): split me up, jesus
     def extract_from_buffer(self, fp):
         if isinstance(fp, io.IOBase) and hasattr(fp, 'name'):
             self.name = fp.name
@@ -690,9 +702,6 @@ class SourcePawnPlugin:
             tags = SPFileTag[self.num_tags].parse(self.base[sect.dataoffs:])
 
             for index, tag in enumerate(tags[:self.num_tags]):
-                # XXX: why do String, Float, etc have ridiculously high tag_ids?
-                # XXX: Tag "String" (id: 1073741828)
-                # XXX: Tag "Float" (id: 1073741829)
                 self.tags[index] = Tag(self, tag.tag_id, tag.name)
 
         # Functions defined as public
@@ -771,7 +780,10 @@ class SourcePawnPlugin:
             lines = SPFdbgLine[num_dbg_lines].parse(self.base[sect.dataoffs:])
 
             for line in lines:
-                self.debug._add_line(line.addr, line.line)
+                self.debug._add_line(
+                    addr=line.addr,
+                    line=line.line,
+                )
 
         if '.dbg.symbols' in sections:
             sect = sections['.dbg.symbols']
@@ -782,15 +794,15 @@ class SourcePawnPlugin:
                 i += SPFdbgSymbol.sizeof()
 
                 self.debug._add_symbol(
-                    sym.addr,
-                    sym.tagid,
-                    sym.codestart,
-                    sym.codeend,
-                    sym.ident,
-                    sym.vclass,
-                    sym.dimcount,
-                    sym.name,
-                    sym.dims,
+                    addr=sym.addr,
+                    tagid=sym.tagid,
+                    codestart=sym.codestart,
+                    codeend=sym.codeend,
+                    ident=sym.ident,
+                    vclass=sym.vclass,
+                    dimcount=sym.dimcount,
+                    name=sym.name,
+                    arraydims=sym.dims,
                 )
 
         if 'rtti.data' in sections:
@@ -805,6 +817,8 @@ class SourcePawnPlugin:
                 rtti_enum = RTTIEnum(plugin=self, name=enum.name)
                 self.rtti_enums.append(rtti_enum)
                 self.rtti_enums_by_name[rtti_enum.name] = rtti_enum
+
+        # TODO(zk): require rtti.methods and rtti.natives
 
         if 'rtti.methods' in sections:
             sect = sections['rtti.methods']
@@ -879,14 +893,10 @@ class SourcePawnPlugin:
             sect = sections['rtti.enumstructs']
             enumstructs_table = SmxRTTIEnumStructTable.parse(self.base[sect.dataoffs:])
 
-            for i, enumstruct in enumerate(enumstructs_table.enumstructs):
-                next_enumstruct = (
-                    enumstructs_table.enumstructs[i + 1]
-                    if i + 1 < len(enumstructs_table.enumstructs)
-                    else None
-                )
-                last_field = next_enumstruct.first_field if next_enumstruct else len(self.rtti_enum_struct_fields)
-
+            last_fields = (
+                [e.first_field for e in enumstructs_table.enumstructs[1:]] + [len(self.rtti_enum_struct_fields)]
+            )
+            for enumstruct, last_field in zip(enumstructs_table.enumstructs, last_fields):
                 rtti_enum_struct = RTTIEnumStruct(
                     plugin=self,
                     name=enumstruct.name,
@@ -914,14 +924,10 @@ class SourcePawnPlugin:
             sect = sections['rtti.classdef']
             classdef_table = SmxRTTIClassDefTable.parse(self.base[sect.dataoffs:])
 
-            for i, classdef in enumerate(classdef_table.classdefs):
-                next_classdef = (
-                    classdef_table.classdefs[i + 1]
-                    if i + 1 < len(classdef_table.classdefs)
-                    else None
-                )
-                last_field = next_classdef.first_field if next_classdef else len(self.rtti_fields)
-
+            last_fields = (
+                [c.first_field for c in classdef_table.classdefs[1:]] + [len(self.rtti_fields)]
+            )
+            for classdef, last_field in zip(classdef_table.classdefs, last_fields):
                 rtti_classdef = RTTIClassDef(
                     plugin=self,
                     name=classdef.name,
