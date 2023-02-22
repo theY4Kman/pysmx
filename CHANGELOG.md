@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 
 ## [Unreleased]
+
+
+## [0.2.0] — 2023-02-22
 ### Added
  - Read all RTTI sections
  - Expand RTTI value interpretation and string formatting
