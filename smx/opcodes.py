@@ -1,7 +1,7 @@
 # Defines all the SourcePawn opcodes and provides helpers
 from __future__ import annotations
 
-from typing import Dict, List, NamedTuple, TYPE_CHECKING
+from typing import Dict, List, NamedTuple, Tuple, TYPE_CHECKING
 
 from smx.compat import iskeyword, StrEnum
 
@@ -9,6 +9,17 @@ if TYPE_CHECKING:
     from smx.vm import SourcePawnAbstractMachine
 
 __all__ = ['sp_opcodes_list', 'opcodes']
+
+
+class StackAddr(int):
+    """Stack-relocated address, recording delta and absolute value"""
+
+    offset: int
+
+    def __new__(cls, addr: int, offset: int):
+        inst = super().__new__(cls, addr)
+        inst.offset = offset
+        return inst
 
 
 class SourcePawnInstructionParam(StrEnum):
@@ -24,7 +35,7 @@ class SourcePawnInstructionParam(StrEnum):
             return amx._getparam()
         elif self is P.STACK:
             offset = amx._getparam()
-            return amx.FRM + offset
+            return StackAddr(amx.FRM + offset, offset)
         else:
             raise ValueError(f'Unknown SourcePawnInstructionParam {self!r}')
 
@@ -35,19 +46,35 @@ class SourcePawnInstructionParam(StrEnum):
         if self is P.CONSTANT:
             arg = hex(value)
             display = str(value)
+
         elif self is P.JUMP:
             arg = hex(value)
             delta = value - amx.instr_addr
-            display = f'{"+" if delta >= 0 else "-"}{hex(delta)}'
-        elif self in (P.FUNCTION, P.ADDRESS, P.STACK):
+            display = f'{"+" if delta >= 0 else "-"}{hex(abs(delta))}'
+
+        elif self is P.STACK:
+            if isinstance(value, StackAddr):
+                arg = f'{hex(value.offset)}/{hex(value)}'
+            else:
+                arg = hex(value)
+
+            meth = amx.plugin.find_method_by_addr(amx.instr_addr)
+            if meth:
+                sym = meth.associated_locals.get(value.offset)
+                if sym:
+                    display = getattr(sym, 'name', None)
+
+        elif self in (P.FUNCTION, P.ADDRESS):
             arg = hex(value)
             sym = amx.plugin.debug.symbols_by_addr.get(value)
-            if sym is not None:
+            if sym:
                 display = getattr(sym, 'name', None)
+
         elif self is P.NATIVE:
             arg = str(value)
             if 0 <= value < len(amx.plugin.rtti_natives):
                 display = amx.plugin.rtti_natives[value].name
+
         else:
             arg = hex(value)
 
@@ -64,8 +91,14 @@ P = SourcePawnInstructionParam
 class SourcePawnInstruction(NamedTuple):
     name: str
     method: str
-    params: tuple[SourcePawnInstructionParam, ...]
+    params: Tuple[SourcePawnInstructionParam, ...]
     is_generated: bool
+
+    def __str__(self):
+        return self.name
+
+    def __repr__(self):
+        return repr(self.name)
 
     def read_params(self, amx: SourcePawnAbstractMachine) -> List[int]:
         return [p.read(amx) for p in self.params]

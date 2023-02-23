@@ -10,11 +10,14 @@ pip install pysmx
 ```
 
 ```python
-from smx.compiler import compile
+from smx import compile_plugin
 
-plugin = compile('''
+plugin = compile_plugin('''
     public TwoPlusTwo() {
         return 2 + 2;
+    }
+    public float FiveDividedByTen() {
+        return 5.0 / 10.0;
     }
     public String:Snakes() {
         new String:s[] = "hiss";
@@ -24,6 +27,8 @@ plugin = compile('''
 
 print(plugin.runtime.call_function_by_name('TwoPlusTwo'))
 # 4
+print(plugin.runtime.call_function_by_name('FiveDividedByTen'))
+# 0.5
 print(plugin.runtime.call_function_by_name('Snakes'))
 # 'hiss'
 ```

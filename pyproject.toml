@@ -24,15 +24,53 @@ construct = "^2.10.68"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.2.1"
+pytest-camel-collect = "^1.0.2"
+pytest-lambda = "^2.2.0"
 tox = "^4.4.5"
 
 [tool.pytest.ini_options]
-addopts = "--tb=short -v"
+# Running "pytest" without specifying paths will use these as defaults
 testpaths = "test/"
+
+# Directories that are not visited by pytest collector:
+norecursedirs = "*.egg .eggs dist build docs .tox .git __pycache__ .mypy_cache .pytest_cache"
+
+# Only search for tests within files matching these patterns
 python_files = [
     "test.py",
     "test_*.py",
 ]
+
+# Discover tests within classes matching these patterns
+python_classes = [
+    "Test*",
+    "Case*",
+    "Context*",
+    "Describe*",
+]
+
+# Only methods matching these patterns are considered tests
+python_functions = [
+    "test_*",
+    "it_*",
+    "its_*",
+]
+
+# Extra options:
+addopts = [
+    # Verbosity
+    #  0 - hide test names while running (only showing ".", "F", etc)
+    #  1 - show full test names while running
+    #  2 - don't truncate assertion failure printouts (includes full diffs)
+    "--verbosity=2",
+
+    # Show an abbreviated traceback format
+    "--tb=short",
+
+    # Also run doctests found within modules
+    "--doctest-modules",
+]
+
 
 [build-system]
 requires = ["poetry-core"]

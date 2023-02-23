@@ -5,11 +5,11 @@ import platform
 import subprocess
 import sys
 from io import BytesIO
+from pathlib import Path
 from tempfile import NamedTemporaryFile
+from typing import Iterable
 
-
-from smx import SourcePawnPlugin
-
+from smx.reader import SourcePawnPlugin
 
 PKG_DIR = os.path.abspath(os.path.dirname(__file__))
 SPCOMP_DIR = os.path.join(PKG_DIR, 'spcomp')
@@ -41,7 +41,7 @@ def _get_compiler_path():
     return _abs_compiler_path(_get_compiler_name())
 
 
-def compile_to_string(code, include_dir=INCLUDE_DIR, extra_args=''):
+def compile_to_string(code, *, include_dir: str | Path | None = INCLUDE_DIR, extra_args: Iterable[str] = ()):
     if isinstance(code, str):
         # NOTE: all source code is assumed to be UTF-8
         code = code.encode('utf-8')
@@ -59,10 +59,10 @@ def compile_to_string(code, include_dir=INCLUDE_DIR, extra_args=''):
         compiler = _get_compiler_path()
         args = [compiler]
         if include_dir:
-            args += ['-i', include_dir]
+            args += ['-i', str(include_dir)]
         args += ['-o', out.name]
         if extra_args:
-            args.append(extra_args)
+            args.extend(extra_args)
         args.append(fp.name)
 
         try:
@@ -77,8 +77,14 @@ def compile_to_string(code, include_dir=INCLUDE_DIR, extra_args=''):
         os.unlink(out.name)
 
 
-def compile(code, **options):
+def compile_plugin(
+    code,
+    *,
+    include_dir: str | Path | None = INCLUDE_DIR,
+    extra_args: Iterable[str] = (),
+    **plugin_options
+):
     """Compile SourcePawn code to a pysmx plugin"""
-    smx = compile_to_string(code, **options)
+    smx = compile_to_string(code, include_dir=include_dir, extra_args=extra_args)
     fp = BytesIO(smx)
-    return SourcePawnPlugin(fp)
+    return SourcePawnPlugin(fp, **plugin_options)

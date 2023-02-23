@@ -10,9 +10,9 @@ from typing import Any, Dict, List, Tuple, TYPE_CHECKING, TypeVar
 
 from smx.definitions import cell, ucell
 from smx.exceptions import SourcePawnPluginError, SourcePawnPluginNativeError
-from smx.opcodes import opcodes
+from smx.opcodes import opcodes, SourcePawnInstruction
 from smx.pawn import SMXInstructions
-from smx.sourcemod import SourceModSystem
+from smx.sourcemod.system import SourceModSystem
 
 if TYPE_CHECKING:
     from smx.reader import SourcePawnPlugin
@@ -62,6 +62,7 @@ class SourcePawnAbstractMachine:
         self.HEA = 0  # heap pointer. Dynamically allocated memory comes from
                       # the heap and the HEA register indicates the top of the
                       # heap
+        self._hp_scope: int = 0
 
         self.data = None  # Actual data section in memory
         self.code = None  # Code section in memory
@@ -69,15 +70,15 @@ class SourcePawnAbstractMachine:
 
         self.smsys = None           # Our local copy of the SourceMod system emulator
         self.sm_natives = None      # Our local copy of the SourceMod Python natives
-        self.instructions = None    # The SMX instructions methods
+        self.instructions: SMXInstructions | None = None    # The SMX instructions methods
 
         # Records the current stack in a list
         # Each item is (data_offset, c_type())
         self._stack = None
 
+        # The list of instructions executed
         # TODO: tie this to the current frame
-        self._executed = None      # The list of instructions executed
-        self._instr_params = None  # List of parameters retrieved during the current instruction
+        self._executed: List[Tuple[int, SourcePawnInstruction, Tuple[int, ...], Any]] = []
 
         # The current instruction being executed
         self.instr = None
@@ -109,7 +110,6 @@ class SourcePawnAbstractMachine:
 
         self._stack = []
         self._executed = []
-        self._instr_params = []
 
         self.instr = 0
         self.instr_addr = 0
@@ -176,38 +176,28 @@ class SourcePawnAbstractMachine:
 
     ###
 
-    def _record_instr_param(self, value: V) -> V:
-        self._instr_params.append(value)
-        return value
-
     def _instr(self):
         return self._getcodecell()
 
-    def _getparam(self, *, peek: bool = False, save: bool = True):
+    def _getparam(self, *, peek: bool = False):
         param = self._getcodecell(peek=peek)
-        if save:
-            self._record_instr_param(param)
         return param
 
     def _getparam_op(self):
         param = self.instr & 0xffff
-        self._record_instr_param(param)
         return param
 
     def _skipparam(self, n=1):
         for x in range(n):
             self._getparam()
 
-    def _popparam(self, *, save: bool = True):
+    def _popparam(self):
         param = self._pop()
-        if save:
-            self._record_instr_param(param)
         return param
 
     def _popparam_float(self):
-        param = self._popparam(save=False)
+        param = self._popparam()
         param = self._sp_ctof(cell(param))
-        self._record_instr_param(param)
         return param
 
     ###
@@ -220,10 +210,13 @@ class SourcePawnAbstractMachine:
         self._stack.append((self.STK, val))
 
     def _pop(self):
-        v = self._getheapcell(self.STK)
+        v = self._peek()
         self.STK += sizeof(cell)
         self._stack.pop()
         return v
+
+    def _peek(self):
+        return self._getheapcell(self.STK)
 
     def _filter_stack(self, new_stk):
         self._stack = [(addr, value) for addr, value in self._stack if addr >= new_stk]
@@ -318,8 +311,8 @@ class SourcePawnAbstractMachine:
         instr = opcodes[op]
         params = instr.read_params(self)
 
-        self._instr_params = []
-        self._executed.append((instr.name, self._instr_params, None, None))
+        exec_entry = (self.instr_addr, instr, tuple(params), None)
+        self._executed.append(exec_entry)
 
         op_handler = getattr(self.instructions, instr.method, None)
         if not op_handler:
@@ -328,12 +321,28 @@ class SourcePawnAbstractMachine:
             logger.info(opcodes[op])
             return
 
-        if self.plugin.spew:
-            # TODO(zk): use logger?
-            formatted_params = instr.format_params(self, params)
-            print(f'0x{self.instr_addr:08x}: {instr.name} {", ".join(formatted_params)}')
+        rval = None
+        try:
+            rval = op_handler(self, *params)
+        finally:
+            if rval is not None:
+                self._executed[-1] = exec_entry[:-1] + (rval,)
 
-        op_handler(self, *params)
+            if self.runtime.spew:
+                formatted_params = instr.format_params(self, params)
+                spew_line = f'0x{self.instr_addr:08x}: {instr.name} {", ".join(formatted_params)}'
+
+                # TODO(zk): use logger?
+                if rval is not None:
+                    if isinstance(rval, int):
+                        rval = f'{hex(rval):>10} ({rval})'
+                    spew_line = f'{spew_line:<70}-> {rval}'
+
+                if self.runtime.spew_stack:
+                    stk = [f'[{hex(addr)}] {hex(value.value)}' for addr, value in self._stack]
+                    spew_line = f'{spew_line:<100} STK: {", ".join(stk)}'
+
+                print(spew_line)
 
 
 class PluginFunction:
@@ -346,27 +355,53 @@ class PluginFunction:
         if not self.runtime.amx.initialized:
             self.runtime.amx.init()
 
-        # CODE 0 always seems to be a HALT instruction.
-        return_addr = 0
-        self.runtime.amx._push(return_addr)
+        # Let's not clobber the current CIP, if possible
+        prev_cip = self.runtime.amx.CIP
+
+        # CODE 0 always seems to be a HALT instruction,
+        # so when we RETN, we'll halt.
+        self.runtime.amx.CIP = 0
 
         # TODO: handle args
         num_args = 0
         self.runtime.amx._push(num_args)
 
+        # Enter the function, taking care to handle frame state
+        self.runtime.amx.instructions.call(self.runtime.amx, self.code_offs)
+
+        # Execute the function body
         rval = self.runtime.amx._execute(self.code_offs)
+
+        # Restore the previous CIP
+        self.runtime.amx.CIP = prev_cip
+
         return rval
 
 
 class SourcePawnPluginRuntime:
     """Executes SourcePawn plug-ins"""
 
-    def __init__(self, plugin: SourcePawnPlugin, *, root_path: str | Path | None = None):
+    def __init__(
+        self,
+        plugin: SourcePawnPlugin,
+        *,
+        spew: bool = False,
+        spew_stack: bool = False,
+        root_path: str | Path | None = None
+    ):
         """
         :param plugin:
             Plug-in object to envelop a runtime context around
+
+        :param spew:
+            Whether to print out traces of instructions as they are executed
+
+        :param spew_stack:
+            If spew=True, whether to print out the stack as each instruction is executed
         """
         self.plugin = plugin
+        self.spew = spew
+        self.spew_stack = spew_stack
         self.root_path = Path(root_path or '.').resolve()
 
         self.amx = SourcePawnAbstractMachine(self, self.plugin)
@@ -386,6 +421,9 @@ class SourcePawnPluginRuntime:
 
     def get_console_output(self) -> str:
         return '\n'.join(msg for time, msg in self.console)
+
+    def get_console_lines(self) -> List[str]:
+        return [msg for time, msg in self.console]
 
     def get_function_by_name(self, name: str) -> PluginFunction | None:
         if name in self.pubfuncs:

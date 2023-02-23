@@ -495,7 +495,7 @@ RTTI_CB_INDEXED_TYPES = {
 
 
 class SmxRTTIDebugMethod(Struct):
-    """An entry in the rtti.debug_methods table
+    """An entry in the .dbg.methods table
 
     This table describes how to find local variable debug info.
     """
@@ -510,7 +510,7 @@ class SmxRTTIDebugMethod(Struct):
 
 
 class SmxRTTIDebugMethodTable(Struct):
-    """A table of rtti.debug_methods entries"""
+    """A table of .dbg.methods entries"""
     header: SmxRTTITableHeader = csfield(SmxRTTITableHeader.as_struct())
     methods: List[SmxRTTIDebugMethod] = csfield(SmxRTTIDebugMethod[cs.this.header.row_count])
 

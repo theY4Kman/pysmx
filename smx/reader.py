@@ -17,6 +17,7 @@ from smx.definitions import (
     RTTI_VAR_CLASS_LOCAL,
     RTTI_VAR_CLASS_STATIC,
     SmxRTTIClassDefTable,
+    SmxRTTIDebugMethodTable,
     SmxRTTIDebugVarTable,
     SmxRTTIEnumStructFieldTable,
     SmxRTTIEnumStructTable,
@@ -229,6 +230,8 @@ class RTTIMethod(RTTINamedTypedSymbol, StringtableName):
 
         self.rtti = plugin.rtti_function_from_offset(signature)
 
+        self.associated_locals: Dict[int, RTTIDbgVar] = {}
+
 
 class RTTINative(RTTINamedTypedSymbol, StringtableName):
     def __init__(self, plugin: SourcePawnPlugin, name: int, signature: int):
@@ -416,6 +419,12 @@ class RTTIDbgVar(RTTINamedTypedSymbol, StringtableNameMixin, _DbgChild):
 
         self.rtti = self.debug.plugin.rtti_from_type_id(self.type_id)
 
+        self.associated_method: RTTIMethod | None = None
+
+    @property
+    def is_global(self) -> bool:
+        return self.vclass_kind == RTTI_VAR_CLASS_GLOBAL
+
     @property
     def name(self):
         return self.debug.plugin.stringtable.get(self._name)
@@ -424,7 +433,7 @@ class RTTIDbgVar(RTTINamedTypedSymbol, StringtableNameMixin, _DbgChild):
         return self.rtti.interpret_value(value, amx)
 
     def __str__(self) -> str:
-        table_name = 'globals' if self.vclass_kind == RTTI_VAR_CLASS_GLOBAL else 'locals'
+        table_name = 'globals' if self.is_global else 'locals'
         # TODO(zk): typing info
         return f'.dbg.{table_name}({self.name})'
 
@@ -441,6 +450,8 @@ class PluginDebug(_PluginChild):
         self.lines: List[DbgLine] = []
         self.symbols: List[DbgSymbol] = []
         self.vars: List[RTTIDbgVar] = []
+        self.globals: List[RTTIDbgVar] = []
+        self.locals: List[RTTIDbgVar] = []
         self.natives: Dict[int, SPFdbgNative] = {}
         self.symbols_by_addr: Dict[int, TypedSymbol] = {}
 
@@ -479,8 +490,8 @@ class PluginDebug(_PluginChild):
 
 
 class SourcePawnPlugin:
-    def __init__(self, filelike=None, *, spew: bool = False):
-        self.spew = spew
+    def __init__(self, filelike=None, **runtime_options):
+        self.runtime_options = runtime_options
 
         self.name: str = '<unnamed>'
         self.debug: PluginDebug = PluginDebug(self)
@@ -501,7 +512,8 @@ class SourcePawnPlugin:
         self.rtti_enums: List[RTTIEnum] = []
         self.rtti_enums_by_name: Dict[str, RTTIEnum] = {}
 
-        self.rtti_methods: Dict[str, RTTIMethod] = {}
+        self.rtti_methods: List[RTTIMethod] = []
+        self.rtti_methods_by_name: Dict[str, RTTIMethod] = {}
         self.rtti_methods_by_addr: Dict[int, RTTIMethod] = {}
 
         self.rtti_natives: List[RTTINative] = []
@@ -551,7 +563,7 @@ class SourcePawnPlugin:
     @property
     def runtime(self):
         if self._runtime is None:
-            self._runtime = vm.SourcePawnPluginRuntime(self)
+            self._runtime = vm.SourcePawnPluginRuntime(self, **self.runtime_options)
         return self._runtime
 
     @runtime.setter
@@ -608,6 +620,15 @@ class SourcePawnPlugin:
             raise SourcePawnPluginError('No RTTI data to grab types from')
 
         return RTTIParser(self, self.rtti_data, offset)
+
+    def find_method_by_addr(self, addr: int) -> RTTIMethod | None:
+        meth = self.rtti_methods_by_addr.get(addr)
+        if meth:
+            return meth
+
+        for meth in self.rtti_methods:
+            if meth.pcode_start <= addr <= meth.pcode_end:
+                return meth
 
     # TODO(zk): split me up, jesus
     def extract_from_buffer(self, fp):
@@ -824,17 +845,18 @@ class SourcePawnPlugin:
             sect = sections['rtti.methods']
             methods_table = SmxRTTIMethodTable.parse(self.base[sect.dataoffs:])
 
-            for meth in methods_table.methods:
+            for entry in methods_table.methods:
                 rtti_method = RTTIMethod(
                     plugin=self,
-                    name=meth.name,
-                    pcode_start=meth.pcode_start,
-                    pcode_end=meth.pcode_end,
-                    signature=meth.signature,
+                    name=entry.name,
+                    pcode_start=entry.pcode_start,
+                    pcode_end=entry.pcode_end,
+                    signature=entry.signature,
                 )
-                self.rtti_methods[rtti_method.name] = rtti_method
-                self.rtti_methods_by_addr[meth.pcode_start] = rtti_method
-                self.debug.symbols_by_addr[meth.pcode_start] = rtti_method
+                self.rtti_methods.append(rtti_method)
+                self.rtti_methods_by_name[rtti_method.name] = rtti_method
+                self.rtti_methods_by_addr[entry.pcode_start] = rtti_method
+                self.debug.symbols_by_addr[entry.pcode_start] = rtti_method
 
         if 'rtti.natives' in sections:
             sect = sections['rtti.natives']
@@ -937,11 +959,11 @@ class SourcePawnPlugin:
                 self.rtti_class_defs.append(rtti_classdef)
                 self.rtti_class_defs_by_name[rtti_classdef.name] = rtti_classdef
 
-        for rtti_var_sect_name in ('.dbg.globals', '.dbg.locals'):
-            if rtti_var_sect_name not in sections:
+        for dbg_var_sect_name in ('.dbg.globals', '.dbg.locals'):
+            if dbg_var_sect_name not in sections:
                 continue
 
-            sect = sections[rtti_var_sect_name]
+            sect = sections[dbg_var_sect_name]
             vars_tab = SmxRTTIDebugVarTable.parse(self.base[sect.dataoffs:])
 
             for var in vars_tab.vars:
@@ -956,7 +978,25 @@ class SourcePawnPlugin:
                 )
 
                 self.debug.vars.append(rtti_var)
+                if rtti_var.is_global:
+                    self.debug.globals.append(rtti_var)
+                else:
+                    self.debug.locals.append(rtti_var)
                 self.debug.symbols_by_addr[rtti_var.address] = rtti_var
+
+        if '.dbg.methods' in sections:
+            sect = sections['.dbg.methods']
+            debug_methods_table = SmxRTTIDebugMethodTable.parse(self.base[sect.dataoffs:])
+
+            last_locals = (
+                [m.first_local for m in debug_methods_table.methods[1:]] + [len(self.debug.locals)]
+            )
+            for entry, last_local in zip(debug_methods_table.methods, last_locals):
+                rtti_method = self.rtti_methods[entry.method_index]
+                rtti_locals = self.debug.locals[entry.first_local:last_local]
+                for rtti_var in rtti_locals:
+                    rtti_var.associated_method = rtti_method
+                    rtti_method.associated_locals[rtti_var.address] = rtti_var
 
         if self.flags & SP_FLAG_DEBUG and (self.debug.files is None or
                                            self.debug.lines is None or

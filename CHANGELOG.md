@@ -6,9 +6,24 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 
 ## [Unreleased]
+### BREAKING
+ - Renamed `smx.compiler.compile` to `smx.compiler.compile_plugin` (now available as `smx.compile_plugin`)
+
+### Added
+ - Add float natives (which power normal floating point operators)
+ - Add trigonometric natives
+ - Add `File.Read` native
+ - Add some basic string natives (`strlen`, `StrContains`, `strcmp`, `strncmp`, `strcopy`, `TrimString`)
+ - Add option to spew stack during execution
+
 ### Fixed
+ - Resolve incorrect calling convention leading to empty stack pops and other faults
  - Resolve broken `File.ReadLine` native
  - Handle natives' "bytes written" counts when null terminators are involved
+
+### Changed
+ - Overhauled opcode parsing and execution to allow `spew` to properly show annotated params and return values
+ - Natives' return values are now automatically converted back to cell values (especially important for floats)
 
 
 ## [0.2.0] — 2023-02-22
