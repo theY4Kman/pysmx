@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 
 ## [Unreleased]
+
+
+## [0.3.0] — 2023-02-23
 ### BREAKING
  - Renamed `smx.compiler.compile` to `smx.compiler.compile_plugin` (now available as `smx.compile_plugin`)
 
