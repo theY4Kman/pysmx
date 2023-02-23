@@ -4,8 +4,9 @@ import ctypes
 import struct
 from ctypes import c_float, c_long, pointer
 from functools import wraps
-from typing import Any, Callable, Literal, Sequence, Type, TYPE_CHECKING
+from typing import Any, Callable, Sequence, Type, TYPE_CHECKING
 
+from smx.compat import Literal
 from smx.struct import cast_value
 
 if TYPE_CHECKING:

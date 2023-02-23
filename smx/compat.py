@@ -1,7 +1,13 @@
 import sys
 from enum import Enum
 
-__all__ = ['StrEnum', 'iskeyword']
+__all__ = ['Literal', 'StrEnum', 'iskeyword']
+
+
+if sys.version_info >= (3, 8):
+    from typing import Literal
+else:
+    from typing_extensions import Literal
 
 
 if sys.version_info >= (3, 11):

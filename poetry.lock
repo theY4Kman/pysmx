@@ -317,14 +317,14 @@ files = [
 
 [[package]]
 name = "tox"
-version = "4.4.5"
+version = "4.4.6"
 description = "tox is a generic virtualenv management and test command line tool"
 category = "dev"
 optional = false
 python-versions = ">=3.7"
 files = [
-    {file = "tox-4.4.5-py3-none-any.whl", hash = "sha256:1081864f1a1393ffa11ebe9beaa280349020579310d217a594a4e7b6124c5425"},
-    {file = "tox-4.4.5.tar.gz", hash = "sha256:f9bc83c5da8666baa2a4d4e884bbbda124fe646e4b1c0e412949cecc2b6e8f90"},
+    {file = "tox-4.4.6-py3-none-any.whl", hash = "sha256:e3d4a65852f029e5ba441a01824d2d839d30bb8fb071635ef9cb53952698e6bf"},
+    {file = "tox-4.4.6.tar.gz", hash = "sha256:9786671d23b673ace7499c602c5746e2a225d1ecd9d9f624d0461303f40bd93b"},
 ]
 
 [package.dependencies]
@@ -349,7 +349,7 @@ testing = ["build[virtualenv] (>=0.10)", "covdefaults (>=2.2.2)", "devpi-process
 name = "typing-extensions"
 version = "4.5.0"
 description = "Backported and Experimental Type Hints for Python 3.7+"
-category = "dev"
+category = "main"
 optional = false
 python-versions = ">=3.7"
 files = [
@@ -472,4 +472,4 @@ testing = ["flake8 (<5)", "func-timeout", "jaraco.functools", "jaraco.itertools"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.7"
-content-hash = "fc711343dba085ecbe2ca50ea8015c5bb840702b4a4333b786caf61919067204"
+content-hash = "4eb1dd8e4335d5f2b63c67ef357b053bee1afcfd5d45ce45e9bdf8c47f769276"
