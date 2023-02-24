@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 
 ## [Unreleased]
+### Added
+ - Add `BreakString` native
+
 ### Fixed
  - Fix issue with `lodb.i` instruction and sizes 1 or 2 reading from wrong memory
  - Fix broken `TrimString` native implementation
