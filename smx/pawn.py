@@ -47,9 +47,9 @@ class SMXInstructions:
     def lodb_i(self, amx: SourcePawnAbstractMachine, offs: int):
         # TODO: memory checking
         if offs == 1:
-            amx.PRI = amx._getdatabyte(amx.PRI)
+            amx.PRI = amx._getheapbyte(amx.PRI)
         elif offs == 2:
-            amx.PRI = amx._getdatashort(amx.PRI)
+            amx.PRI = amx._getheapshort(amx.PRI)
         elif offs == 4:
             amx.PRI = amx._getheapcell(amx.PRI)
 

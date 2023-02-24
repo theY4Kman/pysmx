@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 
 ## [Unreleased]
+### Fixed
+ - Fix issue with `lodb.i` instruction and sizes 1 or 2 reading from wrong memory
 
 
 ## [0.3.0] — 2023-02-23

@@ -72,6 +72,9 @@ SP_DBG_SCOPE_STATIC = 2
 ucell = ctypes.c_uint32
 cell = ctypes.c_int32
 
+# Base type of all ctypes. Not importable anywhere.
+PyCSimpleType = type(cell)
+
 
 class SPFileSection(Struct):
     """File section header format."""

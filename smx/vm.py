@@ -6,9 +6,9 @@ import sys
 from ctypes import *
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, TYPE_CHECKING, TypeVar
+from typing import Any, Dict, List, Tuple, Type, TYPE_CHECKING, TypeVar
 
-from smx.definitions import cell, ucell
+from smx.definitions import cell, PyCSimpleType, ucell
 from smx.exceptions import SourcePawnPluginError, SourcePawnPluginNativeError
 from smx.opcodes import opcodes, SourcePawnInstruction
 from smx.pawn import SMXInstructions
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 V = TypeVar('V')
+CType = TypeVar('CType', bound=PyCSimpleType)
 
 
 def list_pop(lst, index=-1, default=None):
@@ -142,11 +143,20 @@ class SourcePawnAbstractMachine:
         val, = struct.unpack('<l', self.data[offset:offset + sizeof(cell)])
         return val
 
-    def _getheapcell(self, offset: int):
-        heap = cast(self.heap, POINTER(cell))
+    def _getheap(self, offset: int, ctype: Type[CType]) -> Any:
+        heap = cast(self.heap, POINTER(ctype))
         heap_ptr = cast(pointer(heap), POINTER(c_void_p))
         heap_ptr.contents.value += offset
         return heap.contents.value
+
+    def _getheapcell(self, offset: int) -> int:
+        return self._getheap(offset, cell)
+
+    def _getheapbyte(self, offset: int) -> int:
+        return self._getheap(offset, c_int8)
+
+    def _getheapshort(self, offset: int) -> int:
+        return self._getheap(offset, c_int16)
 
     def _getstackcell(self, offset=0):
         return self._getheapcell(self.STK + offset)
