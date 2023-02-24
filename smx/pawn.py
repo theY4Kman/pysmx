@@ -776,7 +776,7 @@ class SMXInstructions:
             amx._writeheap(fill_pos, fill_vec)
 
         array = (cell * data_fill_size).from_address(addressof(amx.heap) + data_vec_addr + data_copy_size_bytes)
-        return list(array)
+        return bytes(array).hex(bytes_per_sep=1, sep=' ')
 
     def initarray_pri(self, amx: SourcePawnAbstractMachine, *args):
         return self._initarray(amx, True, *args)
