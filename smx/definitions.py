@@ -69,6 +69,11 @@ SP_DBG_SCOPE_GLOBAL = 0
 SP_DBG_SCOPE_LOCAL  = 1
 SP_DBG_SCOPE_STATIC = 2
 
+#: Maximum number of parameters in a function signature
+SP_MAX_EXEC_PARAMS = 32
+#: Maximum number of arguments when calling a function (relates to the bit pattern of sEXPRSTART)
+SP_MAX_CALL_ARGUMENTS = 127
+
 ucell = ctypes.c_uint32
 cell = ctypes.c_int32
 

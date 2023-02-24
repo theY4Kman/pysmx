@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 ### Added
+ - Add support for calling plugin functions with arguments (including by-ref/copyback args, with their mutated values returned)
  - Add `BreakString` native
 
 ### Fixed

@@ -35,7 +35,7 @@ def interpret_params(natives: SourceModNatives, params: Sequence[int], *param_ty
      - cell: for integers (or "any:" tag)
      - bool: a cell cast to boolean
      - float: floating point numbers
-     - string: dereferenced pointer into DAT/heap containing a string
+     - string: dereferenced pointer into heap containing a string
      - writable_string: eats two params (String:s, maxlength) and returns a
             special object with a .write('string') method, for writing strings
             back to the plugin.

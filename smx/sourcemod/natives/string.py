@@ -42,8 +42,7 @@ class StringNatives(SourceModNativesMixin):
 
     @native('writable_string', 'string')
     def strcopy(self, dest: WritableString, src: str) -> int:
-        # XXX(zk): surely this manual finagling of null terminator counts will be wrong due to SM idiosyncrasies
-        return dest.write(src + '\0') - 1
+        return dest.write(src, null_terminate=True)
 
     @native('cell')
     def TrimString(self, string_offs: int) -> int:

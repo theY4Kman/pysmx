@@ -25,6 +25,27 @@ def test_function_calling(compile_plugin):
     '''.strip().replace(' ', '')
 
 
+def test_function_calling_with_args(compile_plugin):
+    # language=SourcePawn
+    plugin = compile_plugin('''
+        String:Snakes(const char[] msg) {
+            char buffer[512];
+            int n = strcopy(buffer, sizeof(buffer), "hiss: ");
+            strcopy(buffer[n], sizeof(buffer)-n, msg);
+            return buffer;
+        }
+        public DontOptimizeOutSnakes() {
+            Snakes("");
+        }
+    ''')
+
+    func = plugin.runtime.get_function_by_name('Snakes')
+
+    expected = 'hiss: hello world'
+    actual = func('hello world')
+    assert expected == actual
+
+
 def test_interpreter(compile_plugin):
     # language=SourcePawn
     plugin = compile_plugin("""
