@@ -36,6 +36,12 @@ class StringNatives(SourceModNativesMixin):
         # XXX(zk): surely this manual finagling of null terminator counts will be wrong due to SM idiosyncrasies
         return dest.write(src + '\0') - 1
 
-    @native('writable_string')
-    def TrimString(self, string: WritableString) -> int:
-        return string.write(string.read().strip(), null_terminate=True)
+    @native('cell')
+    def TrimString(self, string_offs: int) -> int:
+        buf = WritableString(self.amx, string_offs, -1)
+        string = buf.read()
+        if len(string) == 0:
+            return 0
+
+        buf.max_length = len(string)
+        return buf.write(string.strip(), null_terminate=True)

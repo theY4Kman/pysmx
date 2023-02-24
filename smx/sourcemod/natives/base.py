@@ -69,7 +69,7 @@ def interpret_params(natives: SourceModNatives, params: Sequence[int], *param_ty
             s = arg
             i += 1
             maxlen = args[i]
-            yield WritableString(natives, s, maxlen)
+            yield WritableString(natives.amx, s, maxlen)
         elif param_type == 'handle':
             yield natives.sys.handles[arg]
         else:
@@ -167,8 +167,8 @@ class MethodMap(SourceModNativesMixin):
 class WritableString:
     """Wrapper around string offset and maxlength for easy writing"""
 
-    def __init__(self, natives, string_offs, max_length):
-        self.natives = natives
+    def __init__(self, amx: SourcePawnAbstractMachine, string_offs, max_length):
+        self.amx = amx
         self.string_offs = string_offs
         self.max_length = max_length
 
@@ -176,7 +176,7 @@ class WritableString:
         return self.read()
 
     def read(self) -> str:
-        return self.natives.amx._local_to_string(self.string_offs)
+        return self.amx._local_to_string(self.string_offs)
 
     def write(self, s: str | bytes, *, null_terminate: bool = False):
         if not isinstance(s, bytes):
@@ -187,5 +187,5 @@ class WritableString:
             s += b'\0'
             num_bytes = min(len(s), self.max_length)
 
-        self.natives.amx._writeheap(self.string_offs, ctypes.create_string_buffer(s, num_bytes))
+        self.amx._writeheap(self.string_offs, ctypes.create_string_buffer(s, num_bytes))
         return num_bytes_written
