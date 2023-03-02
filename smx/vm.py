@@ -26,6 +26,7 @@ from ctypes import (
 from enum import Enum
 from typing import Any, List, NamedTuple, Tuple, Type, TYPE_CHECKING, TypeVar
 
+from smx.compat import hexlify
 from smx.definitions import cell, PyCSimpleType, SPCodeFeature, ucell
 from smx.errors import SourcePawnErrorCode
 from smx.exceptions import SourcePawnPluginError, SourcePawnRuntimeError
@@ -727,6 +728,8 @@ class SourcePawnAbstractMachine:
                 if rval is not None:
                     if isinstance(rval, int):
                         rval = f'{hex(rval):>10} ({rval})'
+                    elif isinstance(rval, bytes):
+                        rval = hexlify(rval)
                     spew_line = f'{spew_line:<70}-> {rval}'
 
                 if self.runtime.spew_stack:

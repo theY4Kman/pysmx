@@ -1,7 +1,7 @@
 import sys
 from enum import Enum
 
-__all__ = ['Literal', 'StrEnum', 'iskeyword']
+__all__ = ['Literal', 'StrEnum', 'iskeyword', 'hexlify']
 
 
 if sys.version_info >= (3, 8):
@@ -93,3 +93,10 @@ else:
         'yield'
     ))
     iskeyword = kwlist.__contains__
+
+
+if sys.version_info >= (3, 8):
+    from binascii import hexlify
+else:
+    def hexlify(data: bytes, sep: str = ' ') -> str:
+        return sep.join(f'{b:02x}' for b in data)
