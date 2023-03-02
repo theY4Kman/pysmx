@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import dataclasses
 import re
 from ctypes import c_int
 from functools import wraps
+from typing import Sequence, TYPE_CHECKING
 
 from smx.definitions import cell, ucell
 from smx.exceptions import SourcePawnStringFormatError
+
+if TYPE_CHECKING:
+    from smx.vm import SourcePawnAbstractMachine
 
 RGX_NUMBER = re.compile(r'[-+]?\d+')
 FMT_LADJUST     = 0x00000004  # left adjustment
@@ -95,7 +100,7 @@ def formatfunc(matches, eats=0, incr=True):
         if eats > 0:
             def wrapper(*args, **kwargs):
                 state = kwargs['state'] if 'state' in kwargs else args[-1]
-                _check_fmt_args(eats, state.arg - 1, state.args)
+                _check_fmt_args(eats, state.arg - 1, state.num_args)
                 return f(*args, **kwargs)
             func = wraps(f)(wrapper)
 
@@ -112,6 +117,21 @@ def isformatfunc(f):
     return callable(f) and hasattr(f, 'formatfunc') and f.formatfunc
 
 
+@dataclasses.dataclass
+class PrintfState:
+    i: int
+    fmt: str
+    out: str
+    flags: int
+    width: int
+    precision: int | None
+    arg: int
+    num_args: int
+    amx: SourcePawnAbstractMachine
+    params: Sequence[int]
+    sz_format: str | None
+
+
 class PrintfFormatter:
     def __init__(self):
         # A mapping of format characters to their format functions
@@ -123,11 +143,11 @@ class PrintfFormatter:
                     self.format_chars[c] = obj
 
     @formatfunc('-')
-    def ladjust(self, ch, state):
+    def ladjust(self, ch: str, state: PrintfState):
         state.flags |= FMT_LADJUST
 
     @formatfunc('.', incr=False)
-    def precision(self, ch, state):
+    def precision(self, ch: str, state: PrintfState):
         state.i += 1  # Eat the period
         prec, chars = atoi(state.fmt[state.i:], length=True)
         state.precision = None if prec < 0 else prec
@@ -135,38 +155,38 @@ class PrintfFormatter:
         state.sz_format += '.' + str(prec)
 
     @formatfunc('0')
-    def zeropad(self, ch, state):
+    def zeropad(self, ch: str, state: PrintfState):
         state.flags |= FMT_ZEROPAD
 
     @formatfunc('123456789', incr=False)
-    def width(self, ch, state):
+    def width(self, ch: str, state: PrintfState):
         state.width,chars = atoi(state.fmt[state.i:], length=True)
         state.i += chars
         state.sz_format += str(state.width)
 
     @formatfunc('%')
-    def percent(self, ch, state):
+    def percent(self, ch: str, state: PrintfState):
         return '%'
 
     @formatfunc('c', eats=1)
-    def char(self, ch, state):
+    def char(self, ch: str, state: PrintfState):
         addr = state.amx._getheapcell(state.params[state.arg])
         val = state.amx._local_to_char(addr)
         return val[0]
 
     @formatfunc('id', eats=1)
-    def integer(self, ch, state):
+    def integer(self, ch: str, state: PrintfState):
         val = state.amx._getheapcell(state.params[state.arg])
         val = c_int(val).value
         return render_int(val, state.flags, state.width)
 
     @formatfunc('u', eats=1)
-    def unsigned_integer(self, ch, state):
+    def unsigned_integer(self, ch: str, state: PrintfState):
         val = state.amx._getheapcell(state.params[state.arg])
         return render_int(val, state.flags, state.width)
 
     @formatfunc('f', eats=1)
-    def floating_point(self, ch, state):
+    def floating_point(self, ch: str, state: PrintfState):
         val = state.amx._getheapcell(state.params[state.arg])
         val = state.amx._sp_ctof(cell(val))
         if state.precision is None:
@@ -174,7 +194,7 @@ class PrintfFormatter:
         return render_float(val, state.flags, state.width, state.precision)
 
     @formatfunc('s', eats=1)
-    def string(self, ch, state):
+    def string(self, ch: str, state: PrintfState):
         if state.params[state.arg] == NULL:
             val = '(null)'
             state.precision = None
@@ -183,28 +203,28 @@ class PrintfFormatter:
         return render_string(val, state.flags, state.width, state.precision)
 
     @formatfunc('b', eats=1)
-    def binary(self, ch, state):
+    def binary(self, ch: str, state: PrintfState):
         val = state.amx._getheapcell(state.params[state.arg])
         return render_bin(val, state.flags, state.width)
 
     @formatfunc('L', eats=1)
-    def client_info(self, ch, state):
+    def client_info(self, ch: str, state: PrintfState):
         raise NotImplementedError
 
     @formatfunc('N', eats=1)
-    def client_name(self, ch, state):
+    def client_name(self, ch: str, state: PrintfState):
         raise NotImplementedError
 
     @formatfunc('T')
-    def translate_client_lang(self, ch, state):
+    def translate_client_lang(self, ch: str, state: PrintfState):
         raise NotImplementedError
 
     @formatfunc('t')
-    def translate_server_lang(self, ch, state):
+    def translate_server_lang(self, ch: str, state: PrintfState):
         raise NotImplementedError
 
     @formatfunc('xX', eats=1)
-    def hexadecimal(self, ch, state):
+    def hexadecimal(self, ch: str, state: PrintfState):
         val = state.amx._getheapcell(state.params[state.arg])
         val = ucell(val).value
         h = render_hex(val, state.flags, state.width)
@@ -213,24 +233,28 @@ class PrintfFormatter:
         return h
 
 
-def atcprintf(_amx, _fmt, _params, _arg, formatter=PrintfFormatter()):
-    _len = len(_fmt)
+def atcprintf(
+    amx: SourcePawnAbstractMachine,
+    fmt: str,
+    params: Sequence[int],
+    formatter: PrintfFormatter = PrintfFormatter(),
+):
+    fmt_len = len(fmt)
 
-    class PrintfState:
-        i = 0
-        fmt = _fmt
-        out = ''
-        flags = 0
-        width = 0
-        precision = None
-        arg = _arg
-        args = _params[0]
-        amx = _amx
-        params = _params
-        sz_format = None
-
-    state = PrintfState()
-    while state.i < _len:
+    state = PrintfState(
+        i=0,
+        fmt=fmt,
+        out='',
+        flags=0,
+        width=0,
+        precision=None,
+        arg=0,
+        num_args=len(params),
+        amx=amx,
+        params=params,
+        sz_format=None,
+    )
+    while state.i < fmt_len:
         percent = state.fmt[state.i:].find('%')
         if percent == -1:
             state.out += state.fmt[state.i:]
@@ -248,7 +272,7 @@ def atcprintf(_amx, _fmt, _params, _arg, formatter=PrintfFormatter()):
         state.sz_format = '%'
 
         do_break = False
-        while state.i < _len:
+        while state.i < fmt_len:
             ch = state.fmt[state.i]
             if ch in formatter.format_chars:
                 f = formatter.format_chars[ch]

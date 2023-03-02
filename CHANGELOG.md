@@ -7,12 +7,41 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 ### Added
+ - Add basic SP runtime exception system, including stack traces
+ - Add full support for array generation/initialization, including support for old-style indirect arrays (plugins without `kUsesDirectArrays` code feature)
  - Add support for calling plugin functions with arguments (including by-ref/copyback args, with their mutated values returned)
+ - Allow the specification of a filename in `compile_plugin` (this filename is baked into debug info)
  - Add `BreakString` native
+ - Add `heap.save` and `heap.restore` instructions for the `kUsesHeapScopes` code feature
+ - Implement `bounds` instruction, reporting runtime errors if out-of-bounds
+ - Add support for top-level function types in native params
+ - Group stack spew by frame
 
 ### Fixed
+ - Fix improper calling convention implementation (pushing return address to stack) causing parent-frame references (such as `this` in enum struct methods) to point at wrong address
+ - Fix non-public array-returning methods not properly allocating space for the return value when called with `PluginFunction`
  - Fix issue with `lodb.i` instruction and sizes 1 or 2 reading from wrong memory
  - Fix broken `TrimString` native implementation
+ - Fix `RoundToZero` doing exactly opposite of what it should do
+ - Fix varargs natives params (the `...` type) improperly passing num params to native implementation
+ - Fix RTTI info for enum struct fields being read from wrong section (`rtti.enumstruct_fields`, not `rtti.es_fields`)
+ - Resolve broken `switch` implementation
+ - Resolve `sdiv` signed division instructions improperly rounding to floor, instead of to zero
+ - `sdiv` division by zero and overflow now reported as runtime error
+ - Resolve `shr` unsigned shift right instruction improperly shifting over 1's, not 0's (this behaviour is due to Python's arbitrary-sized integers and how they work when not masked)
+ - Fix `inc` and `dec` family of instructions double-dereferencing
+ - Fix `movs` not actually copying data
+
+### Changed
+ - Allow multiple include dirs to be passed to `compile_plugin`
+ - Allow native functions beginning with `__` to avoid Python class name mangling
+ - Print spew instruction before executing, and update the line afterward (using the magic of carriage returns)
+ - Reorganize innards into more modules
+ - Remove useless level of indirection, `PluginDebug`
+
+### Testing
+ - Add and pass the full sourcepawn test suite
+ - Add icdiff-based pretty diffs on test failures
 
 
 ## [0.3.0] — 2023-02-23

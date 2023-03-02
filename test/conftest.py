@@ -8,6 +8,11 @@ from pytest_lambda import lambda_fixture
 
 import smx
 
+pytest_plugins = [
+    # Load our icdiff-based pretty diffs plugin
+    'test.plugins.pretty_diffs',
+]
+
 test_dir = lambda_fixture(lambda: Path(__file__).parent.resolve(), scope='session')
 repo_dir = lambda_fixture(lambda test_dir: test_dir.parent, scope='session')
 

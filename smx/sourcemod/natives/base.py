@@ -12,7 +12,8 @@ from smx.struct import cast_value
 if TYPE_CHECKING:
     from smx.sourcemod.natives import SourceModNatives
     from smx.sourcemod.system import SourceModSystem
-    from smx.vm import SourcePawnAbstractMachine, SourcePawnPluginRuntime
+    from smx.vm import SourcePawnAbstractMachine
+    from smx.runtime import SourcePawnPluginRuntime
 
 
 def sp_ctof(value: int):
@@ -25,9 +26,10 @@ def sp_ftoc(value: float) -> int:
     return struct.unpack('<L', struct.pack('<f', value))[0]
 
 
-NativeParamType = Literal['cell', 'bool', 'float', 'string', 'writable_string', 'handle', '...']
+NativeParamType = Literal['cell', 'bool', 'float', 'string', 'writable_string', 'handle', 'function', '...']
 
 
+# TODO(zk): convert this all to use RTTI
 def interpret_params(natives: SourceModNatives, params: Sequence[int], *param_types: NativeParamType):
     """Convert VM params into native Python types
 
@@ -40,6 +42,7 @@ def interpret_params(natives: SourceModNatives, params: Sequence[int], *param_ty
             special object with a .write('string') method, for writing strings
             back to the plugin.
      - handle: a handle ID dereferenced to its backing object
+     - function: a funcid wrapped as a PluginFunction
      - ...: variadic params, interpreted as cells
 
     :param natives: SourceModNatives instance
@@ -52,7 +55,6 @@ def interpret_params(natives: SourceModNatives, params: Sequence[int], *param_ty
     for param_type in param_types:
         if param_type == '...':
             remaining_params = args[i:]
-            yield len(remaining_params)
             yield from remaining_params
             return
 
@@ -72,6 +74,8 @@ def interpret_params(natives: SourceModNatives, params: Sequence[int], *param_ty
             yield WritableString(natives.amx, s, maxlen)
         elif param_type == 'handle':
             yield natives.sys.handles[arg]
+        elif param_type == 'function':
+            yield natives.runtime.get_function_by_id(arg)
         else:
             raise ValueError('Unsupported param type %s' % param_type)
 
@@ -93,7 +97,7 @@ def convert_return_value(rval: Any) -> int:
         raise TypeError(f'Unsupported return value {rval!r}')
 
 
-def native(f: Callable[..., Any] | NativeParamType, *types: NativeParamType):
+def native(f: Callable[..., Any] | NativeParamType, *types: NativeParamType, interpret: bool = True):
     """Labels a function/method as a native
 
     Optionally, takes a list of param types to automatically perform parameter
@@ -104,10 +108,11 @@ def native(f: Callable[..., Any] | NativeParamType, *types: NativeParamType):
             # ...
 
     """
-    interpret = False
     if isinstance(f, str):
+        if not interpret:
+            raise ValueError('Cannot specify types without interpret=True')
+
         types = (f,) + types
-        interpret = True
         f = None
 
     def _native(fn):
@@ -134,6 +139,15 @@ class SourceModNativesMixin:
     sys: SourceModSystem
     amx: SourcePawnAbstractMachine
     runtime: SourcePawnPluginRuntime
+
+    def __init_subclass__(cls):
+        # Allow native methods to begin with __ without getting mangled
+        mangled_prefix = f'_{cls.__name__}__'
+        for name, attr in dict(vars(cls)).items():
+            if name.startswith(mangled_prefix):
+                unmangled_name = name[len(mangled_prefix)-2:]
+                setattr(cls, unmangled_name, attr)
+                delattr(cls, name)
 
 
 class _MethodMapDescriptor:

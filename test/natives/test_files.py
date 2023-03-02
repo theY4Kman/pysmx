@@ -88,7 +88,8 @@ def test_read(compile_plugin, tmp_path, ctype, sm_type, printf, elements):
         }
     ''' % {
         'num_elements': len(elements),
-        'file': str(binary_file),
+        # Escape backslashes in the path for testing under Windows
+        'file': str(binary_file).replace('\\', '\\\\'),
         'sm_type': sm_type,
         'printf': printf,
     })

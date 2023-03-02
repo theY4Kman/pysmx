@@ -7,6 +7,8 @@ from smx.sourcemod.natives.console import ConsoleNatives
 from smx.sourcemod.natives.convars import ConVarNatives
 from smx.sourcemod.natives.files import FilesNatives
 from smx.sourcemod.natives.float import FloatNatives
+from smx.sourcemod.natives.handles import HandlesNatives
+from smx.sourcemod.natives.shell import ShellNatives
 from smx.sourcemod.natives.string import StringNatives
 from smx.sourcemod.natives.timers import TimerNatives
 
@@ -14,14 +16,7 @@ if TYPE_CHECKING:
     from smx.sourcemod.system import SourceModSystem
 
 
-class SourceModNatives(
-    ConsoleNatives,
-    ConVarNatives,
-    FilesNatives,
-    FloatNatives,
-    StringNatives,
-    TimerNatives,
-):
+class BaseSourceModNatives:
     def __init__(self, sys: SourceModSystem):
         """
         :param sys:
@@ -48,7 +43,25 @@ class SourceModNatives(
         if callable(func) and getattr(func, 'is_native', False):
             return func
 
-    @native('cell')
-    def CloseHandle(self, handle_id: int) -> None:
-        # TODO(zk): run time error if handle is invalid
-        self.sys.handles.close_handle(handle_id)
+
+class SourceModNatives(
+    BaseSourceModNatives,
+
+    ConsoleNatives,
+    ConVarNatives,
+    FilesNatives,
+    FloatNatives,
+    HandlesNatives,
+    StringNatives,
+    TimerNatives,
+):
+    pass
+
+
+class SourceModTestNatives(
+    BaseSourceModNatives,
+
+    FloatNatives,
+    ShellNatives,
+):
+    """Natives used in testing only"""

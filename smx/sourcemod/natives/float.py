@@ -26,7 +26,7 @@ class FloatNatives(SourceModNativesMixin):
 
     @native('float')
     def RoundToZero(self, value: float) -> float:
-        return math.floor(value) if value < 0 else math.ceil(value)
+        return math.ceil(value) if value < 0 else math.floor(value)
 
     @native('float')
     def RoundToCeil(self, value: float) -> float:

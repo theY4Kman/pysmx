@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import dataclasses
 import itertools
-from ctypes import addressof, c_uint16, c_uint32, c_uint8, sizeof
-from typing import TYPE_CHECKING
+from ctypes import addressof, c_uint16, c_uint32, c_uint8, memmove, memset, sizeof
+from typing import List, TYPE_CHECKING
 
-from smx.definitions import cell, ucell
+from smx.definitions import cell
+from smx.errors import SourcePawnErrorCode
 from smx.exceptions import SourcePawnOpcodeDeprecated, SourcePawnOpcodeNotGenerated, SourcePawnOpcodeNotSupported
-from smx.struct import cast_value
 
 if TYPE_CHECKING:
     from smx.vm import SourcePawnAbstractMachine
@@ -44,13 +45,13 @@ class SMXInstructions:
         amx.PRI = amx._getheapcell(amx.PRI)
         return amx.PRI
 
-    def lodb_i(self, amx: SourcePawnAbstractMachine, offs: int):
+    def lodb_i(self, amx: SourcePawnAbstractMachine, num_bytes: int):
         # TODO: memory checking
-        if offs == 1:
-            amx.PRI = amx._getheapbyte(amx.PRI)
-        elif offs == 2:
+        if num_bytes == 1:
+            amx.PRI = amx._getheapchar(amx.PRI)
+        elif num_bytes == 2:
             amx.PRI = amx._getheapshort(amx.PRI)
-        elif offs == 4:
+        elif num_bytes == 4:
             amx.PRI = amx._getheapcell(amx.PRI)
 
         return amx.PRI
@@ -72,35 +73,15 @@ class SMXInstructions:
         return rval
 
     def call(self, amx: SourcePawnAbstractMachine, addr: int):
-        # Push return address on stack
-        amx._push(amx.CIP)
-
-        # Save current FRM to stack
-        amx._push(amx.FRM)
-
-        saved_hp_scope = self._heap_alloc(amx, sizeof(cell))
-        amx._writeheap(saved_hp_scope, cell(amx._hp_scope))
-        amx._push(saved_hp_scope)
-
-        amx.FRM = amx.STK
-        # TODO: CHKMARGIN
-
+        amx._push_frame(addr=addr, return_addr=amx.CIP)
         amx.CIP = addr
 
     def proc(self, amx: SourcePawnAbstractMachine):
         pass
 
     def retn(self, amx: SourcePawnAbstractMachine):
-        amx.STK = amx.FRM
-
-        saved_hp_scope = amx._pop()
-        amx._hp_scope = amx._getheapcell(saved_hp_scope)
-        amx.HEA = saved_hp_scope
-
-        amx.FRM = amx._pop()
-
-        return_addr = amx._pop()
-        amx.CIP = return_addr
+        frame = amx._pop_frame()
+        amx.CIP = frame.return_addr
 
         # Remove params
         num_params = amx._pop()
@@ -268,15 +249,10 @@ class SMXInstructions:
         # TODO: CHKMARGIN CHKHEAP
         return amx.ALT
 
-    def heap(self, amx: SourcePawnAbstractMachine, offs: int):
-        amx.ALT = self._heap_alloc(amx, offs)
+    def heap(self, amx: SourcePawnAbstractMachine, amount: int):
+        amx.ALT = amx._heap_alloc(amount)
         # TODO: CHKMARGIN CHKHEAP
         return amx.ALT
-
-    def _heap_alloc(self, amx: SourcePawnAbstractMachine, amount: int) -> int:
-        out = amx.HEA
-        amx.HEA += amount
-        return out
 
     # Jumps
     def jump(self, amx: SourcePawnAbstractMachine, addr: int):
@@ -329,8 +305,8 @@ class SMXInstructions:
         return amx.PRI
 
     def shr(self, amx: SourcePawnAbstractMachine):
-        pri = cast_value(ucell, amx.PRI)
-        amx.PRI = pri >> amx.ALT
+        # NOTE: we must mask 32 bits, or Python will shift an infinite stream of 1s
+        amx.PRI = (amx.PRI & 0xffffffff) >> amx.ALT
         return amx.PRI
 
     def sshr(self, amx: SourcePawnAbstractMachine):
@@ -363,31 +339,33 @@ class SMXInstructions:
         return amx.PRI
 
     # Division
-    def sdiv(self, amx: SourcePawnAbstractMachine, offs: int):
-        if amx.PRI == 0:
-            raise ZeroDivisionError
+    def _sdiv(self, amx: SourcePawnAbstractMachine, pri: bool):
+        if pri:
+            divisor, dividend = amx.ALT, amx.PRI
+        else:
+            divisor, dividend = amx.PRI, amx.ALT
 
-        amx.PRI = amx.PRI / offs
-        amx.ALT = amx.PRI % offs
+        if divisor == 0:
+            amx.report_error(SourcePawnErrorCode.DIVIDE_BY_ZERO)
 
-        if amx.ALT != 0 and (amx.ALT ^ offs) < 0:
-            amx.PRI -= 1
-            amx.ALT += offs
+        # -INT_MIN / -1 is an overflow.
+        if divisor == -1 and dividend == -2147483648:
+            amx.report_error(SourcePawnErrorCode.INTEGER_OVERFLOW)
 
+        # NOTE: Python's int division always rounds to floor, but Pawn rounds to zero
+        quotient = int(dividend / divisor)
+        remainder = dividend - quotient * divisor
+
+        amx.PRI = quotient
+        amx.ALT = remainder
+
+    def sdiv(self, amx: SourcePawnAbstractMachine):
+        self._sdiv(amx, True)
         return amx.PRI, amx.ALT
 
-    def sdiv_alt(self, amx: SourcePawnAbstractMachine, offs: int):
-        if amx.PRI == 0:
-            raise ZeroDivisionError
-
-        amx.ALT = amx.ALT / offs
-        amx.PRI = amx.ALT % offs
-
-        if amx.PRI != 0 and (amx.PRI ^ offs) < 0:
-            amx.ALT -= 1
-            amx.PRI += offs
-
-        return amx.ALT, amx.PRI
+    def sdiv_alt(self, amx: SourcePawnAbstractMachine):
+        self._sdiv(amx, False)
+        return amx.PRI, amx.ALT
 
     # Bitwise operators
     def and_(self, amx: SourcePawnAbstractMachine):
@@ -496,7 +474,8 @@ class SMXInstructions:
         return val
 
     def inc_i(self, amx: SourcePawnAbstractMachine):
-        offs = cast_value(cell, amx.PRI)
+        # XXX(zk): does PRI need to be interpreted as ucell?
+        offs = amx.PRI
         val = amx._getheapcell(offs) + 1
         amx._writeheap(offs, cell(val))
         return val
@@ -522,13 +501,16 @@ class SMXInstructions:
         return val
 
     def dec_i(self, amx: SourcePawnAbstractMachine):
-        offs = cast_value(cell, amx.PRI)
+        # XXX(zk): does PRI need to be interpreted as ucell?
+        offs = amx.PRI
         val = amx._getheapcell(offs) - 1
         amx._writeheap(offs, cell(val))
         return val
 
     def movs(self, amx: SourcePawnAbstractMachine, num_bytes: int):
-        amx.heap[amx.ALT:][:num_bytes] = amx.heap[amx.PRI:][:num_bytes]
+        dest = amx._throw_if_bad_addr(amx.ALT)
+        source = amx._throw_if_bad_addr(amx.PRI)
+        memmove(dest, source, num_bytes)
         return amx.heap[amx.ALT:][:num_bytes]
 
     def fill(self, amx: SourcePawnAbstractMachine, offs: int):
@@ -547,42 +529,48 @@ class SMXInstructions:
         # NOTE: it is assumed PRI contains the exit value, which in our case is
         #       the final return value.
 
-    def bounds(self, amx: SourcePawnAbstractMachine, offs: int):
-        # XXX(zk): does this need to do anything else?
-        pass
+    def bounds(self, amx: SourcePawnAbstractMachine, limit: int):
+        if amx.PRI & 0xffffffff > limit:
+            amx.report_out_of_bounds_error(amx.PRI, limit)
 
-    def switch_(self, amx: SourcePawnAbstractMachine):
-        # +1 to skip the CASETBL opcode
-        cptr = amx._jumprel(amx.CIP) + sizeof(cell)
+    def switch(self, amx: SourcePawnAbstractMachine, casetbl_addr: int):
+        cptr = casetbl_addr + sizeof(cell)  # skip actual instr
+        num_cases = amx._readcodecell(cptr)
+
+        cptr += sizeof(cell)
+        default_case_addr = amx._readcodecell(cptr)
+
+        # After casetbl's args, all cases are defined
+        cptr += sizeof(cell)
 
         # TODO: assert amx.CIP == OP_CASETBL
         # preset to none-matched case
-        amx.CIP = amx._jumprel(cptr + sizeof(cell))
+        amx.CIP = default_case_addr
 
         # number of records in the case table
-        i = amx._readcodecell(cptr)
+        i = num_cases
 
         # Check each case
-        while i > 0 and amx._getheapcell(cptr) != amx.PRI:
+        while i > 0 and amx._readcodecell(cptr) != amx.PRI:
             i -= 1
-            cptr += 2
+            cptr += sizeof(cell) * 2
 
         if i > 0:
-            amx.CIP = amx._jumprel(cptr + 1)  # case found
+            amx.CIP = amx._jumprel(cptr + sizeof(cell))  # case found
             return amx.CIP
 
-    def casetbl(self, amx: SourcePawnAbstractMachine):
+    def casetbl(self, amx: SourcePawnAbstractMachine, num_cases: int, addr: int):
         pass
 
     def swap_pri(self, amx: SourcePawnAbstractMachine):
         offs = amx._getheapcell(amx.STK)
-        amx._writeheap(amx.STK, amx.PRI)
+        amx._writeheap(amx.STK, cell(amx.PRI))
         amx.PRI = offs
         return amx.PRI
 
     def swap_alt(self, amx: SourcePawnAbstractMachine):
         offs = amx._getheapcell(amx.STK)
-        amx._writeheap(amx.STK, amx.ALT)
+        amx._writeheap(amx.STK, cell(amx.ALT))
         amx.ALT = offs
         return amx.ALT
 
@@ -715,24 +703,39 @@ class SMXInstructions:
     def tracker_pop_setheap(self, amx: SourcePawnAbstractMachine):
         raise NotImplementedError
 
-    def genarray(self, amx: SourcePawnAbstractMachine):
-        raise NotImplementedError
+    def _genarray(self, amx: SourcePawnAbstractMachine, num_dims: int, auto_zero: bool):
+        dims = [amx._peek(dim * sizeof(cell)) for dim in range(num_dims)]
+        base_addr = amx._generate_array(dims, auto_zero=auto_zero)
 
-    def genarray_z(self, amx: SourcePawnAbstractMachine):
-        raise NotImplementedError
+        # Pop all but the last argument, which is where the array addr will be stored
+        for _ in range(num_dims - 1):
+            amx._pop()
+
+        # Output the base address of the array
+        amx._writestack(cell(base_addr))
+        amx._stack_set(amx.STK, cell(base_addr))
+
+        return base_addr
+
+    def genarray(self, amx: SourcePawnAbstractMachine, num_dims: int):
+        return self._genarray(amx, num_dims, False)
+
+    def genarray_z(self, amx: SourcePawnAbstractMachine, num_dims: int):
+        return self._genarray(amx, num_dims, True)
 
     def stradjust_pri(self, amx: SourcePawnAbstractMachine):
-        raise NotImplementedError
+        amx.PRI = (amx.PRI + sizeof(cell)) << 2
+        return amx.PRI
 
     def stackadjust(self, amx: SourcePawnAbstractMachine):
-        raise NotImplementedError
+        raise SourcePawnOpcodeNotGenerated
 
 
     def ldgfn_pri(self, amx: SourcePawnAbstractMachine):
-        raise NotImplementedError
+        raise SourcePawnOpcodeNotGenerated
 
     def rebase(self, amx: SourcePawnAbstractMachine):
-        pass
+        raise SourcePawnOpcodeNotGenerated
 
     def _initarray(
         self,
@@ -759,7 +762,8 @@ class SMXInstructions:
             tpl_iv_vec = (cell * iv_size).from_buffer_copy(
                 amx.data[tpl_iv_vec_addr:tpl_iv_vec_addr + iv_size_bytes]
             )
-            amx._writeheap(iv_vec_addr, tpl_iv_vec)
+            for i, offset in enumerate(tpl_iv_vec):
+                amx._writeheap(iv_vec_addr + i * sizeof(cell), cell(offset + array_addr))
 
             tpl_data_vec = (cell * data_copy_size).from_buffer_copy(
                 amx.data[tpl_data_vec_addr:tpl_data_vec_addr + data_copy_size_bytes]
@@ -775,7 +779,7 @@ class SMXInstructions:
                 fill_vec = fill_vec_type()
             amx._writeheap(fill_pos, fill_vec)
 
-        array = (cell * data_fill_size).from_address(addressof(amx.heap) + data_vec_addr + data_copy_size_bytes)
+        array = (cell * data_copy_size).from_address(addressof(amx.heap) + data_vec_addr + data_copy_size_bytes)
         return bytes(array).hex(bytes_per_sep=1, sep=' ')
 
     def initarray_pri(self, amx: SourcePawnAbstractMachine, *args):
@@ -785,10 +789,10 @@ class SMXInstructions:
         return self._initarray(amx, False, *args)
 
     def heap_save(self, amx: SourcePawnAbstractMachine):
-        pass
+        return amx._enter_heap_scope()
 
     def heap_restore(self, amx: SourcePawnAbstractMachine):
-        pass
+        return amx._leave_heap_scope()
 
 
     def fabs(self, amx: SourcePawnAbstractMachine):

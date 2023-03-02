@@ -3,13 +3,12 @@ from __future__ import annotations
 
 import ctypes
 from enum import IntEnum
-from typing import Tuple, List
+from typing import List, Tuple
 
 import construct as cs
-from construct_typed import csfield
+from construct_typed import csfield, FlagsEnumBase, TFlagsEnum
 
 from smx.struct import Struct
-
 
 SPFILE_MAGIC = 0x53504646
 
@@ -81,6 +80,17 @@ cell = ctypes.c_int32
 PyCSimpleType = type(cell)
 
 
+class SPCodeFeature(FlagsEnumBase):
+    Deprecated0 = 1 << 0
+
+    # This feature adds the INIT_ARRAY opcode, and requires that multi-dimensional
+    # arrays use direct internal addressing.
+    DirectArrays = 1 << 1
+
+    # This feature adds the HEAP_SAVE and HEAP_RESTORE opcodes.
+    HeapScopes = 1 << 2
+
+
 class SPFileSection(Struct):
     """File section header format."""
     nameoffs: int = csfield(cs.Int32ul)  # Relative offset into global string table
@@ -109,6 +119,16 @@ class SPFileCode(Struct):
     flags: int = csfield(cs.Int16ul)       # Flags
     main: int = csfield(cs.Int32ul)        # Address to "main," if any
     code: int = csfield(cs.Int32ul)        # Relative offset to code
+
+    ##
+    # List of features flags that this code requires.
+    #
+    # This field is only guaranteed to be present when codeversion >= 13 or
+    # higher. Note that newer spcomp versions will still include a 0-filled
+    # value. This is legal since anything between the end of the code header
+    # and the code buffer is undefined. The field should still be ignored.
+    #
+    features: int = csfield(TFlagsEnum(cs.Int32ul, SPCodeFeature))
 
 
 class SPFileData(Struct):
@@ -321,7 +341,7 @@ class SmxRTTIEnumStruct(Struct):
     # Index into the name table.
     name: int = csfield(cs.Int32ul)
 
-    # First row in the rtti.es_fields table. Rows up to the next
+    # First row in the rtti.enumstruct_fields table. Rows up to the next
     # enumstruct's first row, or the end of the enumstruct table, are
     # owned by this entry.
     first_field: int = csfield(cs.Int32ul)
@@ -337,7 +357,7 @@ class SmxRTTIEnumStructTable(Struct):
 
 
 class SmxRTTIEnumStructField(Struct):
-    """An entry in the rtti.es_fields table"""
+    """An entry in the rtti.enumstruct_fields table"""
     # Index into the name table.
     name: int = csfield(cs.Int32ul)
 

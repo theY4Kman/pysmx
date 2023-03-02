@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 import subprocess
 import sys
 from io import BytesIO
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from tempfile import mkdtemp
 from typing import Iterable
 
-from smx.reader import SourcePawnPlugin
+from smx.plugin import SourcePawnPlugin
 
 PKG_DIR = os.path.abspath(os.path.dirname(__file__))
 SPCOMP_DIR = os.path.join(PKG_DIR, 'spcomp')
@@ -41,50 +42,71 @@ def _get_compiler_path():
     return _abs_compiler_path(_get_compiler_name())
 
 
-def compile_to_string(code, *, include_dir: str | Path | None = INCLUDE_DIR, extra_args: Iterable[str] = ()):
+def compile_to_string(
+    code,
+    *,
+    filename: str | None = None,
+    include_dir: str | Path | Iterable[str | Path] | None = INCLUDE_DIR,
+    extra_args: Iterable[str] = ()
+):
     if isinstance(code, str):
         # NOTE: all source code is assumed to be UTF-8
         code = code.encode('utf-8')
 
-    fp = NamedTemporaryFile(prefix='tmp_plugin', suffix='.sp', delete=False)
-    fp.write(code)
-    fp.flush()
+    if include_dir is None:
+        include_dir = []
+    elif isinstance(include_dir, (str, Path)):
+        include_dir = [include_dir]
 
-    out = NamedTemporaryFile(prefix='tmp_plugin', suffix='.smx', delete=False)
+    if not filename:
+        filename = 'tmp_plugin.sp'
+
+    base_name = os.path.splitext(filename)[0]
+    out_filename = base_name + '.smx'
+
+    tmp_dir = mkdtemp(prefix=base_name)
     try:
-        # Files must be closed first, so spcomp can open it on Windows
-        fp.close()
-        out.close()
+        tmp_path = Path(tmp_dir)
+        in_file = tmp_path / filename
+        out_file = tmp_path / out_filename
+
+        in_file.write_bytes(code)
+        out_file.touch(exist_ok=True)
 
         compiler = _get_compiler_path()
-        args = [compiler]
-        if include_dir:
-            args += ['-i', str(include_dir)]
-        args += ['-o', out.name]
-        if extra_args:
-            args.extend(extra_args)
-        args.append(fp.name)
+
+        include_dir_args = [
+            arg
+            for path in include_dir
+            for arg in ('-i', str(path))
+        ]
+        args = [
+            compiler,
+            *include_dir_args,
+            '-o', str(out_file),
+            *extra_args,
+            str(in_file),
+        ]
 
         try:
-            subprocess.check_output(args)
+            subprocess.check_output(args, text=True)
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f'spcomp failed with code {e.returncode}: {e.stdout}')
 
-        with open(out.name, 'rb') as compiled:
-            return compiled.read()
+        return out_file.read_bytes()
     finally:
-        os.unlink(fp.name)
-        os.unlink(out.name)
+        shutil.rmtree(tmp_dir)
 
 
 def compile_plugin(
     code,
     *,
-    include_dir: str | Path | None = INCLUDE_DIR,
+    filename: str | None = None,
+    include_dir: str | Path | Iterable[str | Path] | None = INCLUDE_DIR,
     extra_args: Iterable[str] = (),
     **plugin_options
 ):
     """Compile SourcePawn code to a pysmx plugin"""
-    smx = compile_to_string(code, include_dir=include_dir, extra_args=extra_args)
+    smx = compile_to_string(code, filename=filename, include_dir=include_dir, extra_args=extra_args)
     fp = BytesIO(smx)
     return SourcePawnPlugin(fp, **plugin_options)

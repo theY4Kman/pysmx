@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
-from ctypes import c_char, c_uint8
+from ctypes import c_char, c_uint8, sizeof
 from typing import Any, Tuple, TYPE_CHECKING
 
 from smx.definitions import (
@@ -14,7 +14,7 @@ from smx.definitions import (
 )
 
 if TYPE_CHECKING:
-    from smx.reader import SourcePawnPlugin
+    from smx.plugin import SourcePawnPlugin
     from smx.vm import SourcePawnAbstractMachine
 
 
@@ -102,12 +102,54 @@ class RTTI:
         if self.type == RTTIControlByte.VOID:
             return 'void'
 
+    def bytes_sizeof(self) -> int | None:
+        """Return the size of this type in bytes.
+
+        For functions, this is the size of the return value. Size of non-fixed arrays is unknown,
+        and will return None. Sizes of more complex types, such as enums, typedefs, or classes
+        are currently unimplemented.
+        """
+        if self.type is RTTIControlByte.VOID:
+            return 0
+        elif self.type is RTTIControlByte.CHAR8:
+            return 1
+        elif self.type in (
+            RTTIControlByte.BOOL,
+            RTTIControlByte.INT32,
+            RTTIControlByte.FLOAT32,
+            RTTIControlByte.ANY,
+        ):
+            return 4
+
+        if self.type == RTTIControlByte.FIXED_ARRAY:
+            return self.inner.bytes_sizeof() * self.index
+
+        if self.type == RTTIControlByte.FUNCTION:
+            return self.inner.bytes_sizeof()
+
+    def cells_sizeof(self) -> int | None:
+        """Return the size of this type in cells.
+
+        For functions, this is the size of the return value. Size of non-fixed arrays is unknown,
+        and will return None. Sizes of more complex types, such as enums, typedefs, or classes
+        are currently unimplemented.
+        """
+        size = self.bytes_sizeof()
+        if size is not None:
+            return (size + 3) // sizeof(cell)
+
     def format_as_arg(self) -> str:
         if self.is_by_ref:
             return f'&{self}'
         return str(self)
 
-    def interpret_value(self, value: int, amx: SourcePawnAbstractMachine) -> Any | None:
+    def interpret_value(
+        self,
+        value: int,
+        amx: SourcePawnAbstractMachine,
+        *,
+        size: int | None = None,
+    ) -> Any | None:
         if self.type == RTTIControlByte.BOOL:
             return bool(value)
         elif self.type in (RTTIControlByte.ANY, RTTIControlByte.INT32, RTTIControlByte.CHAR8):
@@ -115,16 +157,19 @@ class RTTI:
         elif self.type == RTTIControlByte.FLOAT32:
             # TODO(zk): less roundabout parsing?
             return amx._sp_ctof(cell(value))
-        elif self.type == RTTIControlByte.FIXED_ARRAY:
+        elif self.type in (RTTIControlByte.FIXED_ARRAY, RTTIControlByte.ARRAY):
+            if self.type is RTTIControlByte.ARRAY:
+                if size is None:
+                    raise ValueError(f'Cannot interpret dynamic array without known size. Please pass `size`.')
+            else:
+                size = self.index
+
             if self.inner.type == RTTIControlByte.CHAR8:
-                buf = (c_char * self.index).from_buffer(amx.heap, value).value
+                buf = (c_char * size).from_buffer(amx.heap, value).value
                 return buf.decode('utf-8')
             else:
-                cells = (cell * self.index).from_buffer(amx.heap, value)
+                cells = (cell * size).from_buffer(amx.heap, value)
                 return [self.inner.interpret_value(c, amx) for c in cells]
-        elif self.type == RTTIControlByte.ARRAY:
-            # TODO(zk)
-            raise NotImplementedError
         elif self.type == RTTIControlByte.FUNCTION:
             return self.inner.interpret_value(value, amx)
         elif self.type == RTTIControlByte.VOID:

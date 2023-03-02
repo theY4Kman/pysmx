@@ -22,9 +22,11 @@ python = "^3.7"
 
 construct-typing = "^0.5.5"
 construct = "^2.10.68"
+more-bisect = "^0.1.1"
 typing-extensions = { version = "^4.5.0", python = "<3.8" }
 
 [tool.poetry.group.dev.dependencies]
+icdiff = "^2.0.6"
 pytest = "^7.2.1"
 pytest-camel-collect = "^1.0.2"
 pytest-lambda = "^2.2.0"

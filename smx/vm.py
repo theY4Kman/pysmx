@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import ctypes
 import dataclasses
+import itertools
 import logging
+import os.path
 import struct
-import sys
 import typing
-from copy import deepcopy
+from contextlib import contextmanager
 from ctypes import (
     addressof,
     c_byte,
@@ -14,6 +15,7 @@ from ctypes import (
     c_float,
     c_int16,
     c_int8,
+    c_uint8,
     c_void_p,
     memmove,
     memset,
@@ -21,21 +23,22 @@ from ctypes import (
     pointer,
     sizeof,
 )
-from datetime import datetime
-from enum import IntFlag
-from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Tuple, Type, TYPE_CHECKING, TypeVar, Union
+from enum import Enum
+from typing import Any, List, NamedTuple, Tuple, Type, TYPE_CHECKING, TypeVar
 
-from smx.definitions import cell, PyCSimpleType, RTTIControlByte, SP_MAX_EXEC_PARAMS, ucell
-from smx.exceptions import SourcePawnPluginError, SourcePawnPluginNativeError
+from smx.definitions import cell, PyCSimpleType, SPCodeFeature, ucell
+from smx.errors import SourcePawnErrorCode
+from smx.exceptions import SourcePawnPluginError, SourcePawnRuntimeError
 from smx.opcodes import opcodes, SourcePawnInstruction
 from smx.pawn import SMXInstructions
-from smx.rtti import RTTI
-from smx.sourcemod.natives.base import convert_return_value, WritableString
 from smx.sourcemod.system import SourceModSystem
 
 if TYPE_CHECKING:
-    from smx.reader import SourcePawnPlugin
+    from typing import NoReturn
+
+    from smx.plugin import SourcePawnPlugin
+    from smx.reader import DbgFile, DbgLine, Native, RTTIMethod
+    from smx.runtime import SourcePawnPluginRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -43,15 +46,111 @@ V = TypeVar('V')
 CType = TypeVar('CType', bound=PyCSimpleType)
 
 
-def list_pop(lst, index=-1, default=None):
-    try:
-        return lst.pop(index)
-    except IndexError:
-        return default
+class FrameType(Enum):
+    INTERNAL = 0
+    SCRIPTED = 1
+    NATIVE = 2
 
 
-def tohex(val):
-    return '%x' % ucell(val).value
+@dataclasses.dataclass
+class Frame:
+    plugin: SourcePawnPlugin
+    frm: int
+    addr: int | None
+    native: Native | None
+    return_addr: int
+
+    @property
+    def type(self) -> FrameType:
+        # XXX(zk): when is the frame type ever INTERNAL?
+        if self.native:
+            return FrameType.NATIVE
+        else:
+            return FrameType.SCRIPTED
+
+    def is_scripted_frame(self) -> bool:
+        return self.type == FrameType.SCRIPTED
+
+    def is_native_frame(self) -> bool:
+        return self.type == FrameType.NATIVE
+
+    def is_internal_frame(self) -> bool:
+        return self.type == FrameType.INTERNAL
+
+    @property
+    def name(self) -> str | None:
+        if self.native:
+            return self.native.name
+
+        meth = self.meth
+        if meth is not None:
+            return meth.name
+
+        return None
+
+    @property
+    def meth(self) -> RTTIMethod | None:
+        if self.addr:
+            return self.plugin.find_method_by_addr(self.addr)
+
+    @property
+    def line(self) -> DbgLine | None:
+        if self.addr:
+            return self.plugin.find_line_by_addr(self.addr)
+
+    @property
+    def file(self) -> DbgFile | None:
+        if self.addr:
+            return self.plugin.find_file_by_addr(self.addr)
+
+
+class StackValue(NamedTuple):
+    addr: int
+    value: PyCSimpleType
+    frame: Frame
+
+
+def dump_stack(frames: List[Frame]) -> str:
+    """Dump the current stack trace to a string"""
+    lines = []
+    for i, frame in enumerate(reversed(frames)):
+        if frame.is_internal_frame():
+            continue
+
+        name = frame.name
+        if not name:
+            lines.append(f'  [{i}] <unknown>')
+            continue
+
+        if frame.is_scripted_frame():
+            dbg_file = frame.file
+            filename = os.path.basename(dbg_file.name) if dbg_file else '<unknown>'
+
+            dbg_line = frame.line
+            assert dbg_line
+
+            desc = f'{filename}::{name}, line {dbg_line.number}'
+        else:
+            desc = f'{name}()'
+
+        lines.append(f'  [{i}] {desc}')
+
+    return '\n'.join(lines)
+
+
+@dataclasses.dataclass
+class AbsoluteIndirectionVectorData:
+    addr: int
+    iv_cursor: int
+    data_cursor: int
+    dims: List[int]
+
+
+@dataclasses.dataclass
+class RelativeIndirectionVectorData:
+    addr: int        # array base
+    dims: List[int]  # Dimension sizes
+    data_offs: int   # Current offset AFTER the indirection vectors (data)
 
 
 class SourcePawnAbstractMachine:
@@ -72,17 +171,17 @@ class SourcePawnAbstractMachine:
         self.PRI = 0  # primary register (ALU, general purpose)
         self.ALT = 0  # alternate register (general purpose)
         self.FRM = 0  # stack frame pointer, stack-relative memory reads and
-                      # writes are relative to the address in this register
+        # writes are relative to the address in this register
         self.CIP = 0  # code instruction pointer
         self.DAT = 0  # offset to the start of the data
         self.COD = 0  # offset to the start of the code
         self.STP = 0  # stack top
         self.STK = 0  # stack index, indicates the current position in the
-                      # stack. The stack runs downwards from the STP register
-                      # towards zero
+        # stack. The stack runs downwards from the STP register
+        # towards zero
         self.HEA = 0  # heap pointer. Dynamically allocated memory comes from
-                      # the heap and the HEA register indicates the top of the
-                      # heap
+        # the heap and the HEA register indicates the top of the
+        # heap
         self._hp_scope: int = 0
 
         self.data = None  # Actual data section in memory
@@ -93,9 +192,12 @@ class SourcePawnAbstractMachine:
         self.sm_natives = None      # Our local copy of the SourceMod Python natives
         self.instructions: SMXInstructions | None = None    # The SMX instructions methods
 
+        # Stack of frame pointers — one for each nested CALL executed
+        self._frames: List[Frame] = []
+
         # Records the current stack in a list
         # Each item is (data_offset, c_type())
-        self._stack = None
+        self._stack: List[StackValue] = []
 
         # The list of instructions executed
         # TODO: tie this to the current frame
@@ -104,9 +206,14 @@ class SourcePawnAbstractMachine:
         # The current instruction being executed
         self.instr = None
         # Address of the current instruction being executed
-        self.instr_addr = None
+        self.instr_addr: int = 0
+        # The current line being executed, if applicable
+        self.instr_line: DbgLine | None = None
         # Whether code is running (i.e. a halt instruction has not been encountered since execution start)
         self.halted = None
+
+        # Stores the runtime exception, if any
+        self.exception = None
 
     def init(self):
         self.COD = self.plugin.pcode.pcode
@@ -122,11 +229,12 @@ class SourcePawnAbstractMachine:
         memset(addressof(self.heap) + self.plugin.datasize, 0, self.plugin.memsize - self.plugin.datasize)
 
         self.HEA = self.plugin.datasize
+        self._hp_scope = self.HEA
         self.STP = len(self.heap)
         self.STK = self.STP
         self.FRM = self.STK  # XXX: this is a guess. Is this correct?
 
-        self.smsys = SourceModSystem(self)
+        self.smsys = SourceModSystem(self, **self.runtime.smsys_options)
         self.sm_natives = self.smsys.natives
         self.instructions = SMXInstructions()
 
@@ -135,7 +243,10 @@ class SourcePawnAbstractMachine:
 
         self.instr = 0
         self.instr_addr = 0
+        self.instr_line = None
         self.halted = False
+
+        self.exception = None
 
         self.initialized = True
 
@@ -175,6 +286,9 @@ class SourcePawnAbstractMachine:
 
     def _getheapbyte(self, offset: int) -> int:
         return self._getheap(offset, c_int8)
+
+    def _getheapchar(self, offset: int) -> int:
+        return self._getheap(offset, c_uint8)
 
     def _getheapshort(self, offset: int) -> int:
         return self._getheap(offset, c_int16)
@@ -238,7 +352,7 @@ class SourcePawnAbstractMachine:
         self.STK -= sizeof(cell)
         val = cell(value)
         self._writeheap(self.STK, val)
-        self._stack.append((self.STK, val))
+        self._stack.append(StackValue(self.STK, val, self._cur_frame()))
 
     def _pop(self):
         v = self._peek()
@@ -246,11 +360,11 @@ class SourcePawnAbstractMachine:
         self._stack.pop()
         return v
 
-    def _peek(self):
-        return self._getheapcell(self.STK)
+    def _peek(self, offset: int = 0):
+        return self._getheapcell(self.STK + offset)
 
     def _filter_stack(self, new_stk):
-        self._stack = [(addr, value) for addr, value in self._stack if addr >= new_stk]
+        self._stack = [sv for sv in self._stack if sv.addr >= new_stk]
 
     def _stack_set(self, set_addr, set_val):
         """
@@ -258,44 +372,281 @@ class SourcePawnAbstractMachine:
         need to manually find and update values.
         """
         index = None
-        for i, (addr, val) in enumerate(self._stack):
-            if set_addr == addr:
+        for i, sv in enumerate(self._stack):
+            if set_addr == sv.addr:
                 index = i
                 break
 
         if index is not None:
-            self._stack[index] = (set_addr, set_val)
+            self._stack[index] = StackValue(set_addr, set_val, self._cur_frame())
+
+    ###
+
+    def _push_frame(
+        self,
+        return_addr: int,
+        *,
+        addr: int | None = None,
+        native: Native | int | None = None,
+    ) -> Frame:
+        if addr is None and native is None:
+            raise ValueError('addr or native must be provided')
+
+        # Save current FRM to stack
+        self._push(self.FRM)
+
+        saved_hp_scope = self._enter_heap_scope()
+        self._push(saved_hp_scope)
+
+        self.FRM = self.STK
+        # TODO: CHKMARGIN
+
+        frame = Frame(
+            plugin=self.plugin,
+            frm=self.FRM,
+            addr=addr,
+            native=native,
+            return_addr=return_addr,
+        )
+        self._frames.append(frame)
+
+        return frame
+
+    def _pop_frame(self) -> Frame:
+        self.STK = self.FRM
+
+        saved_hp_scope = self._pop()
+        self._leave_heap_scope(saved_hp_scope)
+
+        self.FRM = self._pop()
+        frame = self._frames.pop()
+
+        return frame
+
+    def _enter_heap_scope(self):
+        saved_hp_scope = self._heap_alloc(sizeof(cell))
+        self._writeheap(saved_hp_scope, cell(self._hp_scope))
+        return saved_hp_scope
+
+    def _leave_heap_scope(self, saved_hp_scope: int | None = None):
+        if saved_hp_scope is None:
+            saved_hp_scope = self._hp_scope
+        self._hp_scope = self._getheapcell(saved_hp_scope)
+        self.HEA = saved_hp_scope
+        return saved_hp_scope
+
+    @contextmanager
+    def _heap_scope(self):
+        self._enter_heap_scope()
+        try:
+            yield
+        finally:
+            self._leave_heap_scope()
+
+    def _cur_frame(self) -> Frame | None:
+        return self._frames[-1] if self._frames else None
 
     ###
 
     def _write(self, addr, value):
         memmove(addr, pointer(value), sizeof(value))
 
-    def _writestack(self, value):
-        self._writeheap(self.STK, value)
+    def _writestack(self, value, **kwargs):
+        self._writeheap(self.STK, value, **kwargs)
 
-    def _writeheap(self, offset, value):
-        self._write(addressof(self.heap) + offset, value)
+    def _writeheap(self, offset, value, **kwargs):
+        addr = self._throw_if_bad_addr(offset, **kwargs)
+        self._write(addr, value)
+
+    def _throw_if_bad_addr(self, offset: int, *, is_heap: bool = False) -> int:
+        if (
+            offset < 0 or
+            not is_heap and (self.HEA <= offset < self.STK or offset >= self.STP) or
+            is_heap and (offset < self.HEA or offset >= self.STK)
+        ):
+            # TODO(zk): report actual error code
+            raise ValueError(f'Address {offset} is out of bounds')
+
+        return addressof(self.heap) + offset
 
     ###
 
-    def _nativecall(self, index, paramoffs):
+    def _heap_alloc(self, amount: int) -> int:
+        out = self.HEA
+        self.HEA += amount
+        return out
+
+    def _generate_array(self, dims: List[int], *, auto_zero: bool) -> int:
+        num_cells = dims[0]
+        iv_size = 0
+        for dim in dims[1:]:
+            # TODO(zk): check array too big
+            num_cells *= dim
+            num_cells += dim
+            iv_size *= dim
+            iv_size += dim * sizeof(cell)
+
+        num_bytes = num_cells * sizeof(cell)
+        base_addr = self._heap_alloc(num_bytes)
+
+        if auto_zero:
+            memset(addressof(self.heap) + base_addr + iv_size, 0, num_bytes - iv_size)
+
+        if self.plugin.uses_direct_arrays():
+            info = AbsoluteIndirectionVectorData(
+                addr=base_addr,
+                dims=dims,
+                iv_cursor=0,
+                data_cursor=iv_size,
+            )
+            self._gen_absolute_indirection_vectors(info, len(dims) - 1)
+            assert info.iv_cursor == iv_size
+            assert info.data_cursor == num_bytes
+        else:
+            offs = self._gen_relative_indirection_vectors(base_addr, dims)
+            assert offs == num_cells
+
+        return base_addr
+
+    def _gen_absolute_indirection_vectors(self, info: AbsoluteIndirectionVectorData, dim: int) -> int:
+        if dim == 0:
+            next_addr = info.data_cursor
+            info.data_cursor += info.dims[0] * sizeof(cell)
+            return next_addr
+
+        iv_base_offset = info.iv_cursor
+        info.iv_cursor += info.dims[dim] * sizeof(cell)
+
+        for i in range(info.dims[dim]):
+            next_array_offset = self._gen_absolute_indirection_vectors(info, dim - 1)
+            iv_cell = iv_base_offset + i * sizeof(cell)
+            next_array_addr = info.addr + next_array_offset
+            self._writeheap(info.addr + iv_cell, cell(next_array_addr))
+
+        return iv_base_offset
+
+    def _gen_relative_indirection_vectors(self, base_addr: int, dims: List[int]) -> int:
+        info = RelativeIndirectionVectorData(
+            addr=base_addr,
+            dims=list(reversed(dims)),
+            data_offs=0,
+        )
+        info.data_offs = self._calc_indirection(info, 0)
+        self._generate_inner_array_indirection_vectors(info, 0, 0)
+        return info.data_offs
+
+    def _calc_indirection(self, info: RelativeIndirectionVectorData, dim: int) -> int:
+        size = info.dims[dim]
+        if dim < len(info.dims) - 2:
+            size += info.dims[dim] * self._calc_indirection(info, dim + 1)
+        return size
+
+    def _generate_inner_array_indirection_vectors(
+        self,
+        info: RelativeIndirectionVectorData,
+        dim: int,
+        cur_offs: int
+    ) -> int:
+        write_offs = cur_offs
+        cur_offs += info.dims[dim]
+
+        if len(info.dims) > 2 and dim < len(info.dims) - 2:
+            for i in range(info.dims[dim]):
+                self._writeheap(
+                    offset=info.addr + write_offs * sizeof(cell),
+                    value=cell((cur_offs - write_offs) * sizeof(cell)),
+                )
+                write_offs += 1
+                cur_offs = self._generate_inner_array_indirection_vectors(info, dim + 1, cur_offs)
+        else:
+            for i in range(info.dims[dim]):
+                self._writeheap(
+                    offset=info.addr + write_offs * sizeof(cell),
+                    value=cell((info.data_offs - write_offs) * sizeof(cell)),
+                )
+                write_offs += 1
+                info.data_offs += info.dims[dim + 1]
+
+        return cur_offs
+
+    def _heap_alloc_2d_array(self, length: int, stride: int, *, init_addr: int | None = None) -> int:
+        array_addr = self._generate_array([stride, length], auto_zero=init_addr is None)
+
+        if init_addr is not None:
+            init_phys = addressof(self.heap) + init_addr
+            for i in range(length):
+                elt_base = self._getheapcell(array_addr + i * sizeof(cell))
+                if not self.plugin.uses_direct_arrays():
+                    elt_base += array_addr + i * sizeof(cell)
+
+                init_row = (cell * stride).from_address(init_phys + i * stride * sizeof(cell))
+                self._writeheap(elt_base, init_row)
+
+        return array_addr
+
+    ###
+
+    @typing.overload
+    def report_error(self, code: SourcePawnErrorCode, msg: str | None = None) -> NoReturn: ...
+
+    @typing.overload
+    def report_error(self, msg: str) -> NoReturn: ...
+
+    def report_error(self, code_or_msg: SourcePawnErrorCode | str, msg: str | None = None) -> NoReturn:
+        assert not self.exception
+
+        if isinstance(code_or_msg, str):
+            msg = code_or_msg
+            code = SourcePawnErrorCode.USER
+        else:
+            code = code_or_msg
+
+        if msg is None:
+            msg = code.msg
+
+        self.exception = SourcePawnRuntimeError(msg, amx=self, code=code)
+        raise self.exception
+
+    def report_out_of_bounds_error(self, addr: int, bounds: int) -> NoReturn:
+        if bounds == 0x7fffffff:
+            # This is an internal protection against negative indices on arrays with unknown size.
+            self.report_error(
+                SourcePawnErrorCode.ARRAY_BOUNDS,
+                f'Array index out-of-bounds (index {addr})',
+            )
+        else:
+            self.report_error(
+                SourcePawnErrorCode.ARRAY_BOUNDS,
+                f'Array index out-of-bounds (index {addr}, limit {bounds + 1})',
+            )
+
+    def dump_stack(self) -> str:
+        """Dump the current stack trace to a string"""
+        return dump_stack(self._frames)
+
+    ###
+
+    def _nativecall(self, index: int, paramoffs: int):
         try:
-            native = tuple(self.plugin.natives.values())[index]
+            native = self.plugin.natives[index]
         except IndexError:
-            raise SourcePawnPluginNativeError(
-                'Invalid native index %d' % index)
+            self.report_error(SourcePawnErrorCode.INVALID_NATIVE)
+            return
 
-        pyfunc = self.sm_natives.get_native(native.name)
-        if pyfunc is None:
-            raise NotImplementedError('Native %s not implemented, yet' %
-                                      native.name)
+        self._push_frame(0, native=native)
+        try:
+            pyfunc = self.sm_natives.get_native(native.name)
+            if pyfunc is None:
+                self.report_error(SourcePawnErrorCode.INVALID_NATIVE)
+                return
 
-        params = ctypes.cast(self.heap, POINTER(cell))
-        params_ptr = ctypes.cast(pointer(params), POINTER(c_void_p))
-        params_ptr.contents.value += paramoffs
+            params = ctypes.cast(self.heap, POINTER(cell))
+            params_ptr = ctypes.cast(pointer(params), POINTER(c_void_p))
+            params_ptr.contents.value += paramoffs
 
-        return pyfunc(params)
+            return pyfunc(params)
+        finally:
+            self._pop_frame()
 
     def _pubcall(self, func_id):
         if not func_id & 1:
@@ -306,7 +657,7 @@ class SourcePawnAbstractMachine:
 
         try:
             # TODO(zk): store publics by index, as well
-            func = tuple(self.plugin.publics.values())[index]
+            func = tuple(self.plugin.publics_by_name.values())[index]
         except IndexError:
             raise SourcePawnPluginError(
                 'Invalid public function index %d' % index)
@@ -317,6 +668,9 @@ class SourcePawnAbstractMachine:
         if not self.initialized:
             self.init()
 
+        if self.runtime.spew:
+            print(f'\nBeginning execution at {hex(code_offs)}')
+
         self.halted = False
         self.CIP = code_offs
         while not self.halted and self.CIP < self.plugin.pcode.size:
@@ -325,7 +679,7 @@ class SourcePawnAbstractMachine:
         rval = self.runtime.amx.PRI
 
         # Peer into debugging symbols to interpret return value as native Python type
-        func = self.plugin.debug.symbols_by_addr.get(code_offs)
+        func = self.plugin.find_symbol_by_addr(code_offs)
         if func:
             parsed_rval = func.parse_value(rval, self)
             if parsed_rval is not None:
@@ -335,6 +689,10 @@ class SourcePawnAbstractMachine:
 
     def _step(self):
         self.instr_addr = self.CIP
+        frame = self._cur_frame()
+        if frame:
+            frame.addr = self.instr_addr
+
         c = self._instr()
         self.instr = c
         op = c & ((1 << sizeof(cell)*4)-1)
@@ -344,6 +702,12 @@ class SourcePawnAbstractMachine:
 
         exec_entry = (self.instr_addr, instr, tuple(params), None)
         self._executed.append(exec_entry)
+
+        spew_line = ''
+        if self.runtime.spew:
+            formatted_params = instr.format_params(self, params)
+            spew_line = f'{self.instr_addr:05x}: {instr.name} {", ".join(formatted_params)}'
+            print(spew_line, end='')
 
         op_handler = getattr(self.instructions, instr.method, None)
         if not op_handler:
@@ -360,468 +724,32 @@ class SourcePawnAbstractMachine:
                 self._executed[-1] = exec_entry[:-1] + (rval,)
 
             if self.runtime.spew:
-                formatted_params = instr.format_params(self, params)
-                spew_line = f'0x{self.instr_addr:08x}: {instr.name} {", ".join(formatted_params)}'
-
-                # TODO(zk): use logger?
                 if rval is not None:
                     if isinstance(rval, int):
                         rval = f'{hex(rval):>10} ({rval})'
                     spew_line = f'{spew_line:<70}-> {rval}'
 
                 if self.runtime.spew_stack:
-                    stk = [f'[{hex(addr)}/{hex(self.STK-addr)}] {hex(value.value)}' for addr, value in self._stack]
-                    spew_line = f'{spew_line:<100} STK: {", ".join(stk)}'
+                    stack_groups = itertools.groupby(self._stack, key=lambda sv: sv.frame)
+                    stack_groups_str = []
+                    for frame, frame_stack in stack_groups:
+                        prefix = ''
 
-                print(spew_line)
-
-
-class ParamCopyFlag(IntFlag):
-    COPYBACK = (1 << 0)
-
-
-class ParamStringFlag(IntFlag):
-    UTF8 = (1 << 0)
-    COPY = (1 << 1)
-    BINARY = (1 << 2)
-
-
-ParamScalarValueT = Union[int, float]
-ParamArrayValueT = Union[str, bytes, List[ParamScalarValueT]]
-ParamValueT = Union[ParamScalarValueT, ParamArrayValueT]
-
-
-@dataclasses.dataclass
-class ParamInfo:
-    value: ParamValueT | None = None
-
-    #: Whether the input was a scalar or a list of values
-    is_scalar: bool = True
-
-    #: Copy-back flags
-    flags: ParamCopyFlag = 0
-
-    # XXX(zk): this is a terrible name. ported from SM
-    #: Whether this is marked as being used
-    marked: bool = False
-
-    #: Size of array in cells, or string in bytes
-    size: int = 0
-
-    #: Whether this is a string
-    is_string: bool = False
-
-    #: String flags
-    string_flags: ParamStringFlag = 0
-
-    #: Local addr of allocated memory for the param
-    local_addr: int = -1
-    #: Physical addr of allocated memory for the param
-    phys_addr: int = -1
-
-
-class CallableReturnValue(NamedTuple):
-    rval: Any
-    args: List[ParamValueT]
-
-
-class ICallable:
-    def push_cell(self, value: int):
-        raise NotImplementedError
-
-    def push_cell_by_ref(self, value: int, flags: ParamCopyFlag = 0):
-        raise NotImplementedError
-
-    def push_float(self, value: float):
-        raise NotImplementedError
-
-    def push_float_by_ref(self, value: float, flags: ParamCopyFlag = 0):
-        raise NotImplementedError
-
-    # TODO(zk): allow ctypes inputs?
-    def push_array(self, value: List[int | float] | None, flags: ParamCopyFlag = 0):
-        raise NotImplementedError
-
-    def push_string(self, value: str):
-        raise NotImplementedError
-
-    def push_string_ex(self, value: str, length: int, string_flags: ParamStringFlag = 0, copy_flags: ParamCopyFlag = 0):
-        raise NotImplementedError
-
-    # TODO(zk): return result
-    def execute(self) -> Tuple[CallableReturnValue | None, int]:
-        raise NotImplementedError
-
-    # TODO(zk): return result
-    def invoke(self) -> Tuple[CallableReturnValue | None, bool]:
-        raise NotImplementedError
-
-
-def _new_callable_params() -> List[ParamInfo]:
-    return [ParamInfo() for _ in range(SP_MAX_EXEC_PARAMS)]
-
-
-class PluginFunction(ICallable):
-    def __init__(self, runtime: SourcePawnPluginRuntime, func_id: int, code_offs: int):
-        self.runtime: SourcePawnPluginRuntime = runtime
-        self.func_id = func_id
-        self.code_offs = code_offs
-
-        self.rtti_method = self.runtime.plugin.rtti_methods_by_addr[code_offs]
-        self.rtti_args = self.rtti_method.rtti.args
-
-        #: Holds arguments for the current invocation
-        self._params: List[ParamInfo] = []
-
-    def __call__(self, *args):
-        call_rval, did_succeed = self.call(*args)
-        return call_rval.rval
-
-    def call(self, *args):
-        if not self.runtime.amx.initialized:
-            self.runtime.amx.init()
-
-        self._params = []
-
-        for i, arg in enumerate(args):
-            if i >= len(self.rtti_args):
-                if self.rtti_args[-1].is_variadic:
-                    rtti_arg = self.rtti_args[-1]
-                else:
-                    raise ValueError(f'Expected {len(self.rtti_args)} arguments, got {len(args)}')
-            else:
-                rtti_arg = self.rtti_args[i]
-
-            if isinstance(arg, (int, bool, float)):
-                if rtti_arg.is_by_ref:
-                    # XXX(zk): are there any cases we *don't* want to copy back?
-                    self.push_cell_by_ref(arg, ParamCopyFlag.COPYBACK)
-                else:
-                    self.push_cell(arg)
-
-            elif isinstance(arg, (str, bytes)):
-                if rtti_arg.is_by_ref:
-                    string_flags = ParamStringFlag.UTF8 if isinstance(arg, str) else ParamStringFlag.BINARY
-                    string_flags |= ParamStringFlag.COPY
-                    self.push_string_ex(arg, len(arg), string_flags, ParamCopyFlag.COPYBACK)
-                else:
-                    self.push_string(arg)
-
-            else:
-                try:
-                    arg_iter = iter(arg)
-                except TypeError:
-                    raise TypeError(f'Invalid argument type {type(arg)}: {arg!r}')
-
-                arg = list(arg_iter)
-                if rtti_arg.is_by_ref:
-                    self.push_array(arg, ParamCopyFlag.COPYBACK)
-                else:
-                    self.push_array(arg)
-
-        return self.invoke()
-
-    def _add_param(self) -> ParamInfo:
-        if len(self._params) >= SP_MAX_EXEC_PARAMS:
-            raise ValueError(f'Cannot add more than {SP_MAX_EXEC_PARAMS} parameters')
-
-        param = ParamInfo()
-        self._params.append(param)
-        return param
-
-    def push_cell(self, value: int):
-        param = self._add_param()
-        param.value = value
-        param.marked = False
-        return param
-
-    def push_cell_by_ref(self, value: int, flags: ParamCopyFlag = 0):
-        param = self.push_array([value], flags)
-        param.is_scalar = True
-        return param
-
-    def push_float(self, value: float):
-        return self.push_cell(typing.cast(int, value))
-
-    def push_float_by_ref(self, value: float, flags: ParamCopyFlag = 0):
-        return self.push_cell_by_ref(typing.cast(int, value), flags)
-
-    def push_array(self, value: List[int | float] | None, flags: ParamCopyFlag = 0):
-        param = self._add_param()
-        param.value = value
-        param.is_scalar = False
-        param.marked = True
-        param.size = len(value) if value is not None else 0
-        param.flags = flags if value is not None else 0
-        param.is_string = False
-        return param
-
-    def push_string(self, value: str):
-        return self.push_string_ex(value, len(value) + 1, ParamStringFlag.COPY, 0)
-
-    def push_string_ex(self, value: str, length: int, string_flags: ParamStringFlag = 0, copy_flags: ParamCopyFlag = 0):
-        param = self._add_param()
-        param.value = value
-        param.is_scalar = False
-        param.marked = True
-        param.size = length
-        param.flags = copy_flags
-        param.is_string = True
-        param.string_flags = string_flags
-        return param
-
-    def execute(self) -> Tuple[CallableReturnValue | None, int]:
-        # TODO(zk): clear pending exceptions
-
-        rval, err = self.invoke()
-        if not err:
-            # TODO(zk): return exception code
-            return None, -1
-
-        # TODO(zk): constant for "no exception"
-        return rval, 0
-
-    def invoke(self) -> Tuple[CallableReturnValue | None, bool]:
-        # TODO(zk): check runnable
-        # TODO(zk): check error state
-
-        # Copy params, allowing reentrancy (calls within calls, yo)
-        params = deepcopy(self._params)
-
-        args: List[int] = []
-        for param in params:
-            # Is this marked as an array?
-            if param.marked:
-                if not param.is_string:
-                    # Allocate a normal/generic array
-                    param.local_addr, param.phys_addr = self.runtime.heap_alloc(param.size)
-                    if param.value is not None:
-                        values = [convert_return_value(v) for v in param.value]
-                        array = (cell * len(values))(*values)
-                        self.runtime.amx._writeheap(param.local_addr, array)
-
-                else:  # is_string
-                    num_cells = (param.size + sizeof(cell) - 1) // sizeof(cell)
-                    param.local_addr, param.phys_addr = self.runtime.heap_alloc(num_cells)
-
-                    if param.string_flags & ParamStringFlag.COPY and param.value is not None:
-                        # TODO(zk): forego these flags for PluginFunction
-                        if param.string_flags & ParamStringFlag.UTF8:
-                            assert isinstance(param.value, str)
-                            value = param.value.encode('utf-8')
-                        elif param.string_flags & ParamStringFlag.BINARY:
-                            assert isinstance(param.value, bytes)
-                            value = param.value
+                        if frame:
+                            stp = frame.frm
+                            name = frame.name or hex(frame.frm)
+                            prefix = f'{name} - '
                         else:
-                            assert isinstance(param.value, str)
-                            value = param.value.encode('latin-1')
-                        buf = WritableString(self.runtime.amx, param.local_addr, param.size)
-                        buf.write(value)
+                            stp = self.STP
 
-                args.append(param.local_addr)
+                        frame_stack_values = [
+                            f'[{hex(sv.addr):>4}/{hex(sv.addr-stp):>4}] {hex(sv.value.value)}'
+                            for sv in frame_stack
+                        ]
+                        stack_groups_str.append(prefix + ', '.join(frame_stack_values))
 
-            else:  # not array
-                args.append(convert_return_value(param.value))
+                    stk = ' || '.join(stack_groups_str)
+                    spew_line = f'{spew_line:<100} : {stk}'
 
-        # TODO(zk): handle exception states
-        rval = self._call(args)
-
-        out_args_rev: List[ParamValueT | None] = []
-        for i, param in reversed(tuple(enumerate(params))):
-            if not param.marked:
-                out_args_rev.append(param.value)
-                continue
-
-            if i < len(self.rtti_args):
-                rtti_arg = self.rtti_args[i]
-            elif self.rtti_args[-1].is_variadic:
-                rtti_arg = self.rtti_args[-1]
-            else:
-                # Default cell type
-                rtti_arg = RTTI(self.runtime.plugin, type=RTTIControlByte.ANY)
-
-            if param.flags & ParamCopyFlag.COPYBACK:
-                if param.is_string:
-                    out_args_rev.append(rtti_arg.interpret_value(param.local_addr, self.runtime.amx))
-                elif param.is_scalar:
-                    val = self.runtime.amx._getheapcell(param.local_addr)
-                    out_args_rev.append(rtti_arg.interpret_value(val, self.runtime.amx))
-                else:
-                    cells = self.runtime.amx._getheap(param.local_addr, (cell * param.size))
-                    values = [rtti_arg.interpret_value(c.value, self.runtime.amx) for c in cells]
-                    out_args_rev.append(values)
-
-            self.runtime.heap_pop(param.local_addr)
-
-        call_rval = CallableReturnValue(rval, out_args_rev[::-1])
-        return call_rval, True
-
-    def _call(self, args: List[int]) -> Any:
-        if not self.runtime.amx.initialized:
-            self.runtime.amx.init()
-
-        # Save current runtime state
-        prev_stk = self.runtime.amx.STK
-        prev_hea = self.runtime.amx.HEA
-        prev_frm = self.runtime.amx.FRM
-        prev_hp_scope = self.runtime.amx._hp_scope
-        prev_cip = self.runtime.amx.CIP
-
-        # CODE 0 always seems to be a HALT instruction,
-        # so when we RETN, we'll halt.
-        self.runtime.amx.CIP = 0
-
-        self.runtime.amx._push(len(args))
-        for arg in reversed(args):
-            self.runtime.amx._push(arg)
-
-        # Abide by calling conventions
-        self.runtime.amx.instructions.call(self.runtime.amx, self.code_offs)
-
-        # Execute the function body
-        rval = self.runtime.amx._execute(self.code_offs)
-
-        # Restore the previous runtime state
-        self.runtime.amx.STK = prev_stk
-        self.runtime.amx.HEA = prev_hea
-        self.runtime.amx.FRM = prev_frm
-        self.runtime.amx._hp_scope = prev_hp_scope
-        self.runtime.amx.CIP = prev_cip
-
-        return rval
-
-
-class SourcePawnPluginRuntime:
-    """Executes SourcePawn plug-ins"""
-
-    def __init__(
-        self,
-        plugin: SourcePawnPlugin,
-        *,
-        spew: bool = False,
-        spew_stack: bool = False,
-        root_path: str | Path | None = None
-    ):
-        """
-        :param plugin:
-            Plug-in object to envelop a runtime context around
-
-        :param spew:
-            Whether to print out traces of instructions as they are executed
-
-        :param spew_stack:
-            If spew=True, whether to print out the stack as each instruction is executed
-        """
-        self.plugin = plugin
-        self.spew = spew
-        self.spew_stack = spew_stack
-        self.root_path = Path(root_path or '.').resolve()
-
-        self.amx = SourcePawnAbstractMachine(self, self.plugin)
-
-        self.pubfuncs: Dict[str, PluginFunction] = {}
-
-        self.last_tick = None
-
-        # Saves all the lines printed to the server console
-        self.console: List[Tuple[datetime, str]] = []
-        self.console_redirect = sys.stdout
-
-    def printf(self, msg) -> None:
-        self.console.append((datetime.now(), msg))
-        if self.console_redirect is not None:
-            print(msg, file=self.console_redirect)
-
-    def get_console_output(self) -> str:
-        return '\n'.join(msg for time, msg in self.console)
-
-    def get_console_lines(self) -> List[str]:
-        return [msg for time, msg in self.console]
-
-    def get_function_by_name(self, name: str) -> PluginFunction | None:
-        if name in self.pubfuncs:
-            return self.pubfuncs[name]
-
-        pub = None
-        if name in self.plugin.publics:
-            pub = self.plugin.publics[name]
-        elif name in self.plugin.inlines:
-            pub = self.plugin.inlines[name]
-
-        if pub:
-            func = PluginFunction(self, pub.funcid, pub.code_offs)
-            self.pubfuncs[name] = func
-            return func
-
-        return None
-
-    def call_function_by_name(self, name: str, *args, **kwargs) -> Any:
-        func = self.get_function_by_name(name)
-        if not func:
-            raise NameError('"%s" is not a valid public function name' % name)
-        return func(*args, **kwargs)
-
-    def call_function(self, pubindex, *args) -> None:
-        # CODE 0 always seems to be a HALT instruction.
-        return_addr = 0
-        self.amx._push(return_addr)
-
-        for arg in args:
-            self.amx._push(arg)
-        self.amx._push(len(args))
-
-        self.amx._pubcall(pubindex)
-
-    def run(self, main: str = 'OnPluginStart') -> Any:
-        """Executes the plugin's main function"""
-        self.amx.init()
-        self.amx.smsys.tick()
-
-        rval = self.call_function_by_name(main)
-
-        self.amx.smsys.timers.poll_for_timers()
-        return rval
-
-    def heap_alloc(self, num_cells: int) -> Tuple[int, int]:
-        """Allocates a bounded block of memory on the secondary stack of a plugin
-
-        Note that although called a heap, it is in fact a stack.
-
-        :param num_cells:
-            Number of cells to allocate
-
-        :return:
-            A tuple of (local_addr, phys_addr), where local_addr is the heap offset
-            used to deallocate the memory, and phys_addr is the physical address
-            where values may be written to
-
-        """
-        num_bytes = num_cells * sizeof(cell)
-
-        # TODO(zk): check stack margin
-
-        bounds_addr = self.amx.HEA
-        self.amx._writeheap(bounds_addr, cell(num_cells))
-        self.amx.HEA += sizeof(cell)
-        local_addr = self.amx.HEA
-        phys_addr = addressof(self.amx.heap) + self.amx.HEA
-
-        self.amx.HEA += num_bytes
-
-        return local_addr, phys_addr
-
-    def heap_pop(self, local_addr: int) -> None:
-        """Pops a heap address off the heap/secondary stack
-
-        Use this to free memory allocated with heap_alloc()
-
-        Note that in SourcePawn, the heap is in fact a bottom-up stack.
-        Deallocations with this method should be performed in precisely the REVERSE order.
-        """
-        bounds_addr = local_addr - sizeof(cell)
-        num_bytes = self.amx._getheapcell(bounds_addr) * sizeof(cell)
-        if self.amx.HEA - num_bytes != local_addr:
-            # TODO(zk): richer exception, with SM's code (5, SP_ERROR_INVALID_ADDRESS)
-            raise RuntimeError('Invalid address')
-
-        self.amx.HEA = bounds_addr
+                # TODO(zk): use logger?
+                print('\r' + spew_line)

@@ -66,7 +66,7 @@ class SourcePawnInstructionParam(StrEnum):
 
         elif self in (P.FUNCTION, P.ADDRESS):
             arg = hex(value)
-            sym = amx.plugin.debug.symbols_by_addr.get(value)
+            sym = amx.plugin.find_symbol_by_addr(value)
             if sym:
                 display = getattr(sym, 'name', None)
 

@@ -55,7 +55,7 @@ class FilesNatives(SourceModNativesMixin):
         if path_type != PathType.PATH_SM:
             raise ValueError('Unsupported path type %s' % path_type)
 
-        suffix = atcprintf(self.amx, fmt, args, 0)
+        suffix = atcprintf(self.amx, fmt, args)
         path = str(self.runtime.root_path / suffix)
         return buffer.write(path, null_terminate=True)
 

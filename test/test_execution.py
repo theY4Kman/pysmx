@@ -1,16 +1,18 @@
+from pytest_lambda import lambda_fixture, static_fixture
+
+
 def test_function_calling(compile_plugin):
     # language=SourcePawn
-    plugin = compile_plugin("""
-        public OnPluginStart()
-        {
-            for (new i; i<5; i++)
+    plugin = compile_plugin(r"""
+        public OnPluginStart() {
+            for (new i; i<5; i++) {
                 func();
+            }
             PrintToServer("end");
         }
 
-        func()
-        {
-            PrintToServer("func");
+        func() {
+            PrintToServer("func\n");
         }
     """)
 
@@ -46,9 +48,10 @@ def test_function_calling_with_args(compile_plugin):
     assert expected == actual
 
 
-def test_interpreter(compile_plugin):
-    # language=SourcePawn
-    plugin = compile_plugin("""
+class TestInterpreter:
+    source = static_fixture(
+        # language=SourcePawn
+        """
         #include <sourcemod>
 
         public Plugin:myinfo = {
@@ -93,7 +96,24 @@ def test_interpreter(compile_plugin):
         ReturnTwentyThreeInner() {
             return 23;
         }
-    """, include_myinfo=False)
+        """,
+        scope='class',
+    )
+    plugin = lambda_fixture(
+        lambda source, compile_plugin: compile_plugin(source, include_myinfo=False)
+    )
 
-    assert plugin.runtime.call_function_by_name('ReturnTwentyThree') == 23
-    assert plugin.runtime.call_function_by_name('ReturnTwentyThreeInner') == 23
+    def test_global_return(self, plugin):
+        expected = 1337
+        actual = plugin.runtime.call_function_by_name('ReturnGlobal')
+        assert expected == actual
+
+    def test_constant_return(self, plugin):
+        expected = 23
+        actual = plugin.runtime.call_function_by_name('ReturnTwentyThreeInner')
+        assert expected == actual
+
+    def test_inner_function_return(self, plugin):
+        expected = 23
+        actual = plugin.runtime.call_function_by_name('ReturnTwentyThree')
+        assert expected == actual
