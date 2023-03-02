@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 
 ## [Unreleased]
+
+
+## [0.4.0] — 2023-03-02
 ### Added
  - Add basic SP runtime exception system, including stack traces
  - Add full support for array generation/initialization, including support for old-style indirect arrays (plugins without `kUsesDirectArrays` code feature)
