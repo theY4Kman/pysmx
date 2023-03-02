@@ -41,7 +41,7 @@ def test_sm_test(test, runner):
         include_dirs = [sourcemod_tests_dir, source_dir]
         include_dirs += test.includes
 
-        with open(test.path, 'r') as fp:
+        with open(test.path, 'r', encoding='utf-8') as fp:
             plugin = smx.compile_plugin(
                 fp.read(),
                 filename=os.path.basename(test.path),
