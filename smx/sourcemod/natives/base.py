@@ -73,7 +73,7 @@ def interpret_params(natives: SourceModNatives, params: Sequence[int], *param_ty
             maxlen = args[i]
             yield WritableString(natives.amx, s, maxlen)
         elif param_type == 'handle':
-            yield natives.sys.handles[arg]
+            yield natives.sys.handles.get(arg)
         elif param_type == 'function':
             yield natives.runtime.get_function_by_id(arg)
         else:

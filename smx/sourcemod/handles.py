@@ -23,8 +23,13 @@ class SourceModHandles:
         self._handles: Dict[int, SourceModHandle] = {}
         # TODO(zk): cloning support? ref counting?
 
-    def __getitem__(self, handle_id):
+    def __getitem__(self, handle_id: int):
         return self._handles[handle_id].obj
+
+    def get(self, handle_id: int):
+        handle = self._handles.get(handle_id)
+        if handle:
+            return handle.obj
 
     def new_handle(self, obj, on_close: Callable[[], None] | None = None):
         self._handle_counter += 1
@@ -32,6 +37,6 @@ class SourceModHandles:
         self._handles[handle_id] = SourceModHandle(handle_id, obj, on_close=on_close)
         return handle_id
 
-    def close_handle(self, handle_id):
+    def close_handle(self, handle_id: int):
         handle = self._handles.pop(handle_id)
         handle.close()

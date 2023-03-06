@@ -109,4 +109,6 @@ def compile_plugin(
     """Compile SourcePawn code to a pysmx plugin"""
     smx = compile_to_string(code, filename=filename, include_dir=include_dir, extra_args=extra_args)
     fp = BytesIO(smx)
+    if filename:
+        fp.name = os.path.splitext(filename)[0] + '.smx'
     return SourcePawnPlugin(fp, **plugin_options)

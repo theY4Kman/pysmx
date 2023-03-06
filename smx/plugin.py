@@ -4,7 +4,7 @@ import io
 import zlib
 from collections import defaultdict
 from ctypes import c_char_p
-from typing import Dict, List
+from typing import BinaryIO, Dict, List
 
 import more_bisect
 
@@ -75,10 +75,11 @@ from smx.rtti import parse_type_id, RTTI, RTTIParser
 
 
 class SourcePawnPlugin:
-    def __init__(self, filelike=None, **runtime_options):
+    def __init__(self, plugin: str | bytes | BinaryIO, *, filename: str | None = None, **runtime_options):
         self.runtime_options = runtime_options
 
         self.name: str = '<unnamed>'
+        self.filename: str = '<unknown>'
         self.filled: bool = False
 
         self.base: bytes | None = None
@@ -150,9 +151,9 @@ class SourcePawnPlugin:
         self._runtime: smx.runtime.SourcePawnPluginRuntime | None = None
         self.myinfo: Myinfo | None = None
 
-        # TODO(zk): allow bytes blobs
-        if filelike is not None:
-            self.extract_from_buffer(filelike)
+        self.load(plugin)
+        if filename is not None:
+            self.filename = filename
 
     def __str__(self):
         if self.myinfo:
@@ -162,6 +163,17 @@ class SourcePawnPlugin:
         if self.filled:
             return 'Nameless SourcePawn Plug-in'
         return 'Empty SourcePawn Plug-in'
+
+    def load(self, plugin: str | bytes | BinaryIO):
+        if isinstance(plugin, str):
+            with open(plugin, 'rb') as fp:
+                self.extract_from_buffer(fp)
+            return
+
+        if isinstance(plugin, bytes):
+            plugin = io.BytesIO(plugin)
+
+        self.extract_from_buffer(plugin)
 
     @property
     def runtime(self):
@@ -266,7 +278,7 @@ class SourcePawnPlugin:
     # TODO(zk): split me up, jesus
     def extract_from_buffer(self, fp):
         if isinstance(fp, io.IOBase) and hasattr(fp, 'name'):
-            self.name = fp.name
+            self.filename = fp.name
 
         hdr = SPFileHdr.parse_stream(fp)
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Callable, Dict, TYPE_CHECKING
 
 from smx.sourcemod.natives.base import MethodMap, native
 from smx.sourcemod.natives.console import ConsoleNatives
@@ -9,6 +9,7 @@ from smx.sourcemod.natives.files import FilesNatives
 from smx.sourcemod.natives.float import FloatNatives
 from smx.sourcemod.natives.handles import HandlesNatives
 from smx.sourcemod.natives.shell import ShellNatives
+from smx.sourcemod.natives.sourcemod import SourceModIncNatives
 from smx.sourcemod.natives.string import StringNatives
 from smx.sourcemod.natives.timers import TimerNatives
 
@@ -43,6 +44,15 @@ class BaseSourceModNatives:
         if callable(func) and getattr(func, 'is_native', False):
             return func
 
+    @classmethod
+    def _get_all_natives(cls) -> Dict[str, Callable[..., Any]]:
+        natives = {}
+        for name in dir(cls):
+            obj = getattr(cls, name)
+            if callable(obj) and getattr(obj, 'is_native', False):
+                natives[name] = obj
+        return natives
+
 
 class SourceModNatives(
     BaseSourceModNatives,
@@ -52,6 +62,7 @@ class SourceModNatives(
     FilesNatives,
     FloatNatives,
     HandlesNatives,
+    SourceModIncNatives,
     StringNatives,
     TimerNatives,
 ):
