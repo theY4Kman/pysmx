@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import ctypes
+import inspect
 import struct
+import typing
 from ctypes import c_float, c_long, pointer
 from functools import wraps
-from typing import Any, Callable, Sequence, Type, TYPE_CHECKING
+from typing import Any, Callable, ClassVar, Dict, List, Sequence, Tuple, Type, TYPE_CHECKING, Union
 
-from smx.compat import Literal
+from smx.compat import get_annotations, Literal, NoneType
+from smx.definitions import cell, ucell
+from smx.sourcemod.handles import SourceModHandle
 from smx.struct import cast_value
 
 if TYPE_CHECKING:
     from smx.sourcemod.natives import SourceModNatives
     from smx.sourcemod.system import SourceModSystem
     from smx.vm import SourcePawnAbstractMachine
-    from smx.runtime import SourcePawnPluginRuntime
+    from smx.runtime import PluginFunction, SourcePawnPluginRuntime
 
 
 def sp_ctof(value: int):
@@ -27,59 +31,6 @@ def sp_ftoc(value: float) -> int:
 
 
 NativeParamType = Literal['cell', 'bool', 'float', 'string', 'writable_string', 'handle', 'function', '...']
-
-
-# TODO(zk): convert this all to use RTTI
-def interpret_params(natives: SourceModNatives, params: Sequence[int], *param_types: NativeParamType):
-    """Convert VM params into native Python types
-
-    Supported types:
-     - cell: for integers (or "any:" tag)
-     - bool: a cell cast to boolean
-     - float: floating point numbers
-     - string: dereferenced pointer into heap containing a string
-     - writable_string: eats two params (String:s, maxlength) and returns a
-            special object with a .write('string') method, for writing strings
-            back to the plugin.
-     - handle: a handle ID dereferenced to its backing object
-     - function: a funcid wrapped as a PluginFunction
-     - ...: variadic params, interpreted as cells
-
-    :param natives: SourceModNatives instance
-    :param params: Iterable of params from the VM
-    :param param_types: list of strings describing how to interpret params
-    """
-    num_params = params[0]
-    args = params[1:1 + num_params]
-    i = 0
-    for param_type in param_types:
-        if param_type == '...':
-            remaining_params = args[i:]
-            yield from remaining_params
-            return
-
-        arg = args[i]
-        if param_type == 'cell' or param_type is None:
-            yield arg
-        elif param_type == 'bool':
-            yield bool(arg)
-        elif param_type == 'float':
-            yield sp_ctof(arg)
-        elif param_type == 'string':
-            yield natives.amx._getheapstring(arg)
-        elif param_type == 'writable_string':
-            s = arg
-            i += 1
-            maxlen = args[i]
-            yield WritableString(natives.amx, s, maxlen)
-        elif param_type == 'handle':
-            yield natives.sys.handles.get(arg)
-        elif param_type == 'function':
-            yield natives.runtime.get_function_by_id(arg)
-        else:
-            raise ValueError('Unsupported param type %s' % param_type)
-
-        i += 1
 
 
 def convert_return_value(rval: Any) -> int:
@@ -97,42 +48,144 @@ def convert_return_value(rval: Any) -> int:
         raise TypeError(f'Unsupported return value {rval!r}')
 
 
-def native(f: Callable[..., Any] | NativeParamType, *types: NativeParamType, interpret: bool = True):
-    """Labels a function/method as a native
+class NativeImpl:
+    is_native = True
 
-    Optionally, takes a list of param types to automatically perform parameter
-    unpacking. For example:
+    impl: Callable[..., float | int | bool | None]
+    native_func: Callable[..., float | int | bool | None] | None
+    param_types: List[Tuple[NativeParamType, type]] | None
 
-        @native('string', 'string', 'string', 'cell', 'bool', 'float', 'bool', 'float')
-        def CreateConVar(name, default_value, description, flags, has_min, min, has_max, max):
-            # ...
+    _annotation_ns: ClassVar[Dict[str, Any]] | None = None
 
-    """
-    if isinstance(f, str):
-        if not interpret:
-            raise ValueError('Cannot specify types without interpret=True')
+    def __init__(self, impl: Callable[..., float | int | bool | None]):
+        self.impl = impl
+        self.native_func = None
+        self.param_types = None
 
-        types = (f,) + types
-        f = None
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self
 
-    def _native(fn):
-        if interpret:
-            original_fn = fn
+        if self.param_types is None:
+            self._init_params()
 
-            @wraps(original_fn)
-            def _wrapped(self, params):
-                interpreted = tuple(interpret_params(self, params, *types))
-                rval = original_fn(self, *interpreted)
-                return convert_return_value(rval)
-            fn = _wrapped
+        if self.native_func is None:
+            @wraps(self.impl)
+            def _native(natives: SourceModNatives, params: Sequence[int]):
+                return self(natives, params)
 
-        fn.is_native = True
-        return fn
+            _native.is_native = True
+            self.native_func = _native
 
-    if f is None:
-        return _native
-    else:
-        return _native(f)
+        return self.native_func.__get__(instance, owner)
+
+    def __call__(self, natives: SourceModNatives, params: Sequence[int]):
+        num_params = params[0]
+        args = params[1:1 + num_params]
+
+        interpreted_args = []
+        i = 0
+        for param_type, coerce in self.param_types:
+            if param_type == '...':
+                interpreted_args.extend(args[i:])
+                break
+
+            arg = args[i]
+            if param_type == 'cell':
+                interpreted_args.append(coerce(arg))
+            elif param_type == 'bool':
+                interpreted_args.append(coerce(arg))
+            elif param_type == 'float':
+                interpreted_args.append(coerce(sp_ctof(arg)))
+            elif param_type == 'string':
+                interpreted_args.append(coerce(natives.amx._getheapstring(arg)))
+            elif param_type == 'writable_string':
+                s = arg
+                i += 1
+                maxlen = args[i]
+                interpreted_args.append(WritableString(natives.amx, s, maxlen))
+            elif param_type == 'handle':
+                interpreted_args.append(natives.sys.handles.get_raw(arg))
+            elif param_type == 'function':
+                interpreted_args.append(natives.runtime.get_function_by_id(arg))
+            else:
+                raise ValueError('Unsupported param type %s' % param_type)
+
+            i += 1
+
+        rval = self.impl(natives, *interpreted_args)
+        return convert_return_value(rval)
+
+    def _init_params(self):
+        from smx.runtime import PluginFunction
+
+        sig = inspect.signature(self.impl)
+
+        local_ns = self._get_annotation_ns()
+        global_ns = self.impl.__globals__
+        annotations = get_annotations(self.impl, globals=global_ns, locals=local_ns, eval_str=True)
+
+        self.param_types = []
+        for i, param in enumerate(sig.parameters.values()):
+            if i == 0 and param.name == 'self':
+                continue
+
+            if param.kind == inspect.Parameter.VAR_POSITIONAL:
+                self.param_types.append(('...', Any))
+                continue
+
+            annotation = annotations.get(param.name, param.annotation)
+            origin = getattr(annotation, '__origin__', annotation)
+            if origin is Union:
+                members = annotation.__args__
+                if NoneType in members and len(members) == 2:
+                    annotation = members[0]
+                    origin = getattr(annotation, '__origin__', annotation)
+                else:
+                    raise TypeError(f'Unsupported parameter type {annotation !r}')
+
+            if (
+                annotation is inspect.Parameter.empty
+                or origin in (cell, ucell)
+                or issubclass(origin, int)
+            ):
+                self.param_types.append(('cell', origin))
+            elif issubclass(origin, bool):
+                self.param_types.append(('bool', origin))
+            elif issubclass(origin, float):
+                self.param_types.append(('float', origin))
+            elif issubclass(origin, str):
+                self.param_types.append(('string', origin))
+            elif annotation is WritableString:
+                self.param_types.append(('writable_string', WritableString))
+
+            elif annotation is SourceModHandle or origin is SourceModHandle:
+                self.param_types.append(('handle', SourceModHandle))
+            elif annotation is PluginFunction:
+                self.param_types.append(('function', PluginFunction))
+
+            else:
+                raise TypeError(f'Unsupported parameter type {annotation !r}')
+
+    @classmethod
+    def _get_annotation_ns(cls) -> Dict[str, Any]:
+        if cls._annotation_ns is None:
+            from smx.plugin import SourcePawnPlugin
+            from smx.runtime import PluginFunction
+
+            cls._annotation_ns = {
+                'typing': typing,
+                'PluginFunction': PluginFunction,
+                'SourceModHandle': SourceModHandle,
+                'SourcePawnPlugin': SourcePawnPlugin,
+                'WritableString': WritableString,
+            }
+
+        return cls._annotation_ns
+
+
+def native(impl: Callable) -> NativeImpl:
+    return NativeImpl(impl)
 
 
 class SourceModNativesMixin:

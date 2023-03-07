@@ -5,7 +5,7 @@ from smx.sourcemod.printf import atcprintf
 
 
 class ConsoleNatives(SourceModNativesMixin):
-    @native('string', '...')
-    def PrintToServer(self, fmt, *args):
+    @native
+    def PrintToServer(self, fmt: str, *args):
         out = atcprintf(self.amx, fmt, args)
         self.runtime.printf(out)

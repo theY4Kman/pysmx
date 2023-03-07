@@ -22,6 +22,7 @@ python = "^3.7"
 
 construct-typing = "^0.5.5"
 construct = "^2.10.68"
+future-typing = { version = "^0.4.1", python = "<3.10" }
 more-bisect = "^0.1.1"
 typing-extensions = { version = "^4.5.0", python = "<3.8" }
 

@@ -4,7 +4,6 @@ import re
 
 from smx.sourcemod.natives.base import native, SourceModNativesMixin, WritableString
 
-
 RGX_BREAK_STRING = re.compile(
     r'^\s*(?:"(?P<quoted>[^"]*)(?:"|$)|(?P<unquoted>\S+))(?P<end_ws>\s*)',
     # ASCII mode ensures \s only matches "\n\v\r\t\f ", like SM does
@@ -13,11 +12,11 @@ RGX_BREAK_STRING = re.compile(
 
 
 class StringNatives(SourceModNativesMixin):
-    @native('string')
+    @native
     def strlen(self, string: str) -> int:
         return len(string)
 
-    @native('string', 'string', 'bool')
+    @native
     def StrContains(self, string: str, substr: str, case_sensitive: bool = True) -> int:
         if not case_sensitive:
             string = string.lower()
@@ -32,19 +31,19 @@ class StringNatives(SourceModNativesMixin):
 
         return (str1 > str2) - (str1 < str2)
 
-    @native('string', 'string', 'bool')
+    @native
     def strcmp(self, str1: str, str2: str, case_sensitive: bool = True) -> int:
         return self._strcmp(str1, str2, case_sensitive)
 
-    @native('string', 'string', 'cell', 'bool')
+    @native
     def strncmp(self, str1: str, str2: str, num: int, case_sensitive: bool = True) -> int:
         return self._strcmp(str1[:num], str2[:num], case_sensitive)
 
-    @native('writable_string', 'string')
+    @native
     def strcopy(self, dest: WritableString, src: str) -> int:
         return dest.write(src, null_terminate=True)
 
-    @native('cell')
+    @native
     def TrimString(self, string_offs: int) -> int:
         buf = WritableString(self.amx, string_offs, -1)
         string = buf.read()
@@ -54,7 +53,7 @@ class StringNatives(SourceModNativesMixin):
         buf.max_length = len(string)
         return buf.write(string.strip(), null_terminate=True)
 
-    @native('string', 'writable_string')
+    @native
     def BreakString(self, source: str, arg: WritableString) -> int:
         if not source:
             arg.write(b'', null_terminate=True)

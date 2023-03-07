@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from smx.sourcemod.handles import SourceModHandle
 from smx.sourcemod.natives.base import native, SourceModNativesMixin, WritableString
 
 if TYPE_CHECKING:
@@ -9,9 +10,11 @@ if TYPE_CHECKING:
 
 
 class SourceModIncNatives(SourceModNativesMixin):
-    @native('handle', 'writable_string')
-    def GetPluginFilename(self, plugin: SourcePawnPlugin | None, buffer: WritableString) -> None:
-        if plugin is None:
+    @native
+    def GetPluginFilename(self, handle: SourceModHandle[SourcePawnPlugin] | None, buffer: WritableString) -> None:
+        if handle is None:
             plugin = self.runtime.plugin
+        else:
+            plugin = handle.obj
 
         buffer.write(plugin.filename)

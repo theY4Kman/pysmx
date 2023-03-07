@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from smx.sourcemod.natives.base import native, SourceModNativesMixin, sp_ftoc, WritableString
+from smx.sourcemod.handles import SourceModHandle
+from smx.sourcemod.natives.base import native, SourceModNativesMixin, WritableString
 
 
 class ConVar:
@@ -28,20 +29,37 @@ class ConVar:
 
 
 class ConVarNatives(SourceModNativesMixin):
-    @native('string', 'string', 'string', 'cell', 'bool', 'float', 'bool', 'float')
-    def CreateConVar(self, name, default_value, description, flags, has_min, min, has_max, max):
-        cvar = ConVar(name, default_value, description, flags, min if has_min else None, max if has_max else None)
+    @native
+    def CreateConVar(
+        self,
+        name: str,
+        default_value: str,
+        description: str,
+        flags: int,
+        has_min: bool,
+        min: float,
+        has_max: bool,
+        max: float
+    ):
+        cvar = ConVar(
+            name,
+            default_value,
+            description,
+            flags,
+            min if has_min else None,
+            max if has_max else None,
+        )
         self.sys.convars[name] = cvar
         return self.sys.handles.new_handle(cvar)
 
-    @native('handle')
-    def GetConVarInt(self, cvar: ConVar) -> int:
-        return int(cvar.value)
+    @native
+    def GetConVarInt(self, handle: SourceModHandle[ConVar]) -> int:
+        return int(handle.obj.value)
 
-    @native('handle')
-    def GetConVarFloat(self, cvar: ConVar) -> float:
-        return float(cvar.value)
+    @native
+    def GetConVarFloat(self, handle: SourceModHandle[ConVar]) -> float:
+        return float(handle.obj.value)
 
-    @native('handle', 'writable_string')
-    def GetConVarString(self, cvar: ConVar, buf: WritableString):
-        return buf.write(cvar.value, null_terminate=True)
+    @native
+    def GetConVarString(self, handle: SourceModHandle[ConVar], buf: WritableString):
+        return buf.write(handle.obj.value, null_terminate=True)

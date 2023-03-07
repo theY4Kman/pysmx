@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from smx.sourcemod.natives.base import native, SourceModNativesMixin
+
+if TYPE_CHECKING:
+    from smx.runtime import PluginFunction
 
 logger = logging.getLogger(__name__)
 
 
 class TimerNatives(SourceModNativesMixin):
-    @native('float', 'cell', 'cell', 'cell')
-    def CreateTimer(self, interval, func, data, flags):
+    @native
+    def CreateTimer(self, interval: float, func: PluginFunction, data: int, flags: int):
         """
         native Handle:CreateTimer(Float:interval, Timer:func, any:data=INVALID_HANDLE, flags=0)
 
