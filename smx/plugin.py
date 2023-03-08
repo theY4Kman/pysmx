@@ -149,7 +149,7 @@ class SourcePawnPlugin:
         self.num_natives: int = 0
 
         self._runtime: smx.runtime.SourcePawnPluginRuntime | None = None
-        self.myinfo: Myinfo | None = None
+        self.myinfo: Dict[str, str] | None = None
 
         self.load(plugin)
         if filename is not None:

@@ -8,7 +8,7 @@ from ctypes import c_float, c_long, pointer
 from functools import wraps
 from typing import Any, Callable, ClassVar, Dict, List, Sequence, Tuple, Type, TYPE_CHECKING, Union
 
-from smx.compat import get_annotations, Literal, NoneType
+from smx.compat import get_annotations, NoneType, StrEnum
 from smx.definitions import cell, ucell
 from smx.sourcemod.handles import SourceModHandle
 from smx.struct import cast_value
@@ -30,10 +30,21 @@ def sp_ftoc(value: float) -> int:
     return struct.unpack('<L', struct.pack('<f', value))[0]
 
 
-NativeParamType = Literal['cell', 'bool', 'float', 'string', 'writable_string', 'handle', 'function', '...']
+class NativeParamType(StrEnum):
+    CELL = 'cell'
+    BOOL = 'bool'
+    FLOAT = 'float'
+    STRING = 'string'
+    WRITABLE_STRING = 'writable_string'
+    HANDLE = 'handle'
+    FUNCTION = 'function'
+    VARARGS = '...'
 
 
-def convert_return_value(rval: Any) -> int:
+NativeReturnType = Union[NoneType, bool, float, int, SourceModHandle]
+
+
+def convert_return_value(rval: NativeReturnType) -> int:
     """Convert a native return value to a cell"""
     if rval is None:
         # XXX(zk): is this how SM handles a void native?
@@ -44,6 +55,8 @@ def convert_return_value(rval: Any) -> int:
         return sp_ftoc(rval)
     elif isinstance(rval, int):
         return rval
+    elif isinstance(rval, SourceModHandle):
+        return rval.id
     else:
         raise TypeError(f'Unsupported return value {rval!r}')
 
@@ -86,27 +99,27 @@ class NativeImpl:
         interpreted_args = []
         i = 0
         for param_type, coerce in self.param_types:
-            if param_type == '...':
+            if param_type == NativeParamType.VARARGS:
                 interpreted_args.extend(args[i:])
                 break
 
             arg = args[i]
-            if param_type == 'cell':
+            if param_type == NativeParamType.CELL:
                 interpreted_args.append(coerce(arg))
-            elif param_type == 'bool':
+            elif param_type == NativeParamType.BOOL:
                 interpreted_args.append(coerce(arg))
-            elif param_type == 'float':
+            elif param_type == NativeParamType.FLOAT:
                 interpreted_args.append(coerce(sp_ctof(arg)))
-            elif param_type == 'string':
+            elif param_type == NativeParamType.STRING:
                 interpreted_args.append(coerce(natives.amx._getheapstring(arg)))
-            elif param_type == 'writable_string':
+            elif param_type == NativeParamType.WRITABLE_STRING:
                 s = arg
                 i += 1
                 maxlen = args[i]
                 interpreted_args.append(WritableString(natives.amx, s, maxlen))
-            elif param_type == 'handle':
+            elif param_type == NativeParamType.HANDLE:
                 interpreted_args.append(natives.sys.handles.get_raw(arg))
-            elif param_type == 'function':
+            elif param_type == NativeParamType.FUNCTION:
                 interpreted_args.append(natives.runtime.get_function_by_id(arg))
             else:
                 raise ValueError('Unsupported param type %s' % param_type)
@@ -131,7 +144,7 @@ class NativeImpl:
                 continue
 
             if param.kind == inspect.Parameter.VAR_POSITIONAL:
-                self.param_types.append(('...', Any))
+                self.param_types.append((NativeParamType.VARARGS, Any))
                 continue
 
             annotation = annotations.get(param.name, param.annotation)
@@ -149,20 +162,20 @@ class NativeImpl:
                 or origin in (cell, ucell)
                 or issubclass(origin, int)
             ):
-                self.param_types.append(('cell', origin))
+                self.param_types.append((NativeParamType.CELL, origin))
             elif issubclass(origin, bool):
-                self.param_types.append(('bool', origin))
+                self.param_types.append((NativeParamType.BOOL, origin))
             elif issubclass(origin, float):
-                self.param_types.append(('float', origin))
+                self.param_types.append((NativeParamType.FLOAT, origin))
             elif issubclass(origin, str):
-                self.param_types.append(('string', origin))
+                self.param_types.append((NativeParamType.STRING, origin))
             elif annotation is WritableString:
-                self.param_types.append(('writable_string', WritableString))
+                self.param_types.append((NativeParamType.WRITABLE_STRING, WritableString))
 
             elif annotation is SourceModHandle or origin is SourceModHandle:
-                self.param_types.append(('handle', SourceModHandle))
+                self.param_types.append((NativeParamType.HANDLE, SourceModHandle))
             elif annotation is PluginFunction:
-                self.param_types.append(('function', PluginFunction))
+                self.param_types.append((NativeParamType.FUNCTION, PluginFunction))
 
             else:
                 raise TypeError(f'Unsupported parameter type {annotation !r}')

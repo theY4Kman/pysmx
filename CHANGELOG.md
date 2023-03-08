@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 ### Added
- - Add `GetPluginFilename` native
+ - Add `GetMyHandle`, `GetPluginFilename`, and `GetPluginInfo` natives
 
 ### Changed
  - Switch `@native` decorator to interpret param types from typing annotations
