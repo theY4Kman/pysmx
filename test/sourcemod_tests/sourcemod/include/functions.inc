@@ -29,7 +29,6 @@
  *
  * Version: $Id$
  */
-asdasd
 #if defined _functions_included
  #endinput
 #endif

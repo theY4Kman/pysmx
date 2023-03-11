@@ -7,7 +7,7 @@ from smx.definitions import cell
 from smx.exceptions import SourcePawnRuntimeError
 from smx.interfaces import ParamCopyFlag, ParamStringFlag
 from smx.sourcemod.natives import FloatNatives
-from smx.sourcemod.natives.base import native, SourceModNativesMixin, WritableString
+from smx.sourcemod.natives.base import native, Pointer, SourceModNativesMixin, WritableString
 
 if TYPE_CHECKING:
     from smx.runtime import PluginFunction
@@ -47,15 +47,13 @@ class ShellNatives(SourceModNativesMixin):
         return len(s)
 
     @native
-    def printnums(self, *addrs) -> int:
+    def printnums(self, *addrs) -> None:
         nums = [self.amx._getheapcell(addr) for addr in addrs]
         self.runtime.printf(', '.join(str(x) for x in nums) + '\n')
-        return 1
 
     @native
-    def print(self, value: str) -> int:
+    def print(self, value: str) -> None:
         self.runtime.printf(value)
-        return len(value)
 
     @native
     def dump_stack_trace(self) -> None:
@@ -74,13 +72,12 @@ class ShellNatives(SourceModNativesMixin):
         # XXX(zk): should this probe more?
         return arg
 
-    # TODO(zk): add conveniences for by-ref params
     @native
-    def access_2d_array(self, array_addr: int, x: int, y: int, out_addr: int) -> int:
+    def access_2d_array(self, array_addr: int, x: int, y: int, out: Pointer[int]) -> bool:
         row_addr = self.amx._getheapcell(array_addr + x * sizeof(cell))
         value = self.amx._getheapcell(row_addr + y * sizeof(cell))
-        self.amx._writeheap(out_addr, cell(value))
-        return 1
+        out.set(value)
+        return True
 
     @native
     def invoke(self, func: PluginFunction, count: int) -> int:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from types import FunctionType
 from typing import Any, Callable, Dict, List, Tuple, TYPE_CHECKING
 
 from smx.sourcemod.natives.base import MethodMap
@@ -25,11 +26,25 @@ RGX_NATIVE = re.compile(
     ^native\s+
     (?P<return_type>\S+)\s+
     (?P<name>\w+)\s*
-    \((?P<params>.*)\)\s*
+    \((?P<params>[^)]*)\)\s*
     (?:;|$)
     ''',
     re.VERBOSE | re.MULTILINE,
 )
+
+
+# NOTE: used to detect unimplemented natives
+def _not_implemented_ellipsis(): ...
+def _not_implemented_error(): raise NotImplementedError
+def _not_implemented_error_inst(): raise NotImplementedError()
+
+
+def is_native_implemented(native_impl: FunctionType) -> bool:
+    return native_impl.__code__.co_code not in (
+        _not_implemented_ellipsis.__code__.co_code,
+        _not_implemented_error.__code__.co_code,
+        _not_implemented_error_inst.__code__.co_code,
+    )
 
 
 class BaseSourceModNatives:
@@ -56,7 +71,7 @@ class BaseSourceModNatives:
             root = self
 
         func = getattr(root, func_name, None)
-        if callable(func) and getattr(func, 'is_native', False):
+        if callable(func) and getattr(func, 'is_native', False) and is_native_implemented(func):
             return func
 
     @classmethod
@@ -69,7 +84,7 @@ class BaseSourceModNatives:
         return natives
 
     @staticmethod
-    def _read_sourcemod_natives(include_dir: str | Path | None = None) -> List[Tuple[Path, str]]:
+    def _read_include_file_natives(include_dir: str | Path | None = None) -> List[Tuple[Path, str]]:
         """Get names of all natives in SourceMod's scripting/include dir"""
         if include_dir is None:
             from smx.compiler import INCLUDE_DIR

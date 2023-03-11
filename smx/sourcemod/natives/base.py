@@ -6,10 +6,24 @@ import struct
 import typing
 from ctypes import c_float, c_long, pointer
 from functools import wraps
-from typing import Any, Callable, ClassVar, Dict, List, Sequence, Tuple, Type, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Dict,
+    Generic,
+    Iterator,
+    List,
+    Sequence,
+    Tuple,
+    Type,
+    TypeVar,
+    TYPE_CHECKING,
+    Union,
+)
 
 from smx.compat import get_annotations, NoneType, StrEnum
-from smx.definitions import cell, ucell
+from smx.definitions import cell, PyCSimpleType, ucell
 from smx.sourcemod.handles import SourceModHandle
 from smx.struct import cast_value
 
@@ -38,6 +52,8 @@ class NativeParamType(StrEnum):
     WRITABLE_STRING = 'writable_string'
     HANDLE = 'handle'
     FUNCTION = 'function'
+    ARRAY = 'array'
+    POINTER = 'pointer'
     VARARGS = '...'
 
 
@@ -117,6 +133,8 @@ class NativeImpl:
                 i += 1
                 maxlen = args[i]
                 interpreted_args.append(WritableString(natives.amx, s, maxlen))
+            elif param_type in (NativeParamType.ARRAY, NativeParamType.POINTER):
+                interpreted_args.append(coerce(natives.amx, arg))
             elif param_type == NativeParamType.HANDLE:
                 interpreted_args.append(natives.sys.handles.get_raw(arg))
             elif param_type == NativeParamType.FUNCTION:
@@ -169,6 +187,11 @@ class NativeImpl:
                 self.param_types.append((NativeParamType.FLOAT, origin))
             elif issubclass(origin, str):
                 self.param_types.append((NativeParamType.STRING, origin))
+
+            elif issubclass(origin, Pointer):
+                self.param_types.append((NativeParamType.POINTER, origin))
+            elif issubclass(origin, Array):
+                self.param_types.append((NativeParamType.ARRAY, origin))
             elif annotation is WritableString:
                 self.param_types.append((NativeParamType.WRITABLE_STRING, WritableString))
 
@@ -269,3 +292,90 @@ class WritableString:
 
         self.amx._writeheap(self.string_offs, ctypes.create_string_buffer(s, num_bytes))
         return num_bytes_written
+
+
+V = TypeVar('V')
+
+
+def get_c_type(py_type: Type[V]) -> PyCSimpleType:
+    if issubclass(py_type, int):
+        return cell
+    elif issubclass(py_type, float):
+        return ctypes.c_float
+    elif issubclass(py_type, bool):
+        return ctypes.c_bool
+    elif issubclass(py_type, (str, bytes)):
+        return ctypes.c_char
+    else:
+        raise TypeError(f'Unsupported type {py_type!r}')
+
+
+class BaseReference(Generic[V]):
+    amx: SourcePawnAbstractMachine
+    offs: int
+    c_ptr: ctypes.POINTER
+
+    py_type: ClassVar[Type]
+    c_type: ClassVar[PyCSimpleType]
+    _c_ptr_type: ClassVar[Type[ctypes.POINTER]]
+
+    def __class_getitem__(cls, py_type: Type[V]) -> Type[BaseReference[V]]:
+        if isinstance(py_type, TypeVar):
+            return super().__class_getitem__(py_type)
+
+        if getattr(cls, 'py_type', None) is not None:
+            raise TypeError(f'{cls.__name__} already has a type set')
+
+        cls_name = f'{cls.__name__}[{py_type.__name__}]'
+        c_type = get_c_type(py_type)
+        attrs = {
+            'py_type': py_type,
+            'c_type': c_type,
+            '_c_ptr_type': ctypes.POINTER(c_type),
+        }
+        return typing.cast(Type[BaseReference], type(cls_name, (cls,), attrs))
+
+    def __new__(cls, *args, **kwargs):
+        if getattr(cls, 'py_type', None) is None:
+            raise TypeError(f'{cls.__name__} has no type set through subscripting')
+        return super().__new__(cls)
+
+    def __init__(self, amx: SourcePawnAbstractMachine, offs: int):
+        self.amx = amx
+        self.offs = offs
+
+        # The actual pointer to the data, which can be dereferenced to individual items
+        self.c_ptr = self._c_ptr_type(self.amx.heap)
+
+        # Pointer to the pointer's address, allowing us to modify that address to point where we wish
+        c_ptr_addr = ctypes.cast(ctypes.pointer(self.c_ptr), ctypes.POINTER(ctypes.c_void_p))
+        c_ptr_addr.contents.value = self.amx._throw_if_bad_addr(self.offs)
+
+
+class Array(BaseReference[V]):
+    def __getitem__(self, item: int | slice) -> V | List[V]:
+        return self.c_ptr[item]
+
+    def __setitem__(self, item: int | slice, value: V | List[V]) -> None:
+        if isinstance(item, slice):
+            indices = range(*item.indices(len(self)))
+            for i, v in zip(indices, value):
+                self.c_ptr[i] = v
+        else:
+            self.c_ptr[item] = value
+
+    def __len__(self) -> int:
+        # TODO(zk): allow config of static size
+        return self.amx.plugin.memsize - self.offs
+
+    def __iter__(self) -> Iterator[V]:
+        for i in range(len(self)):
+            yield self[i]
+
+
+class Pointer(BaseReference[V]):
+    def get(self) -> V:
+        return self.c_ptr[0]
+
+    def set(self, value: V) -> None:
+        self.c_ptr[0] = value

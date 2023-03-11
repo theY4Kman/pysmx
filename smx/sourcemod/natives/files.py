@@ -6,7 +6,7 @@ import os
 from enum import IntEnum
 
 from smx.sourcemod.handles import SourceModHandle
-from smx.sourcemod.natives.base import native, MethodMap, SourceModNativesMixin, WritableString
+from smx.sourcemod.natives.base import Array, native, MethodMap, SourceModNativesMixin, WritableString
 from smx.sourcemod.printf import atcprintf
 
 
@@ -27,7 +27,7 @@ class FileMethodMap(MethodMap):
         return buf.write(line, null_terminate=True)
 
     @native
-    def Read(self, handle: SourceModHandle[File], items_addr: int, num_items: int, item_size: int):
+    def Read(self, handle: SourceModHandle[File], items: Array[bytes], num_items: int, item_size: int):
         if item_size not in (1, 2, 4):
             # TODO(zk): native error
             raise ValueError('Unsupported item size %s' % item_size)
@@ -36,7 +36,7 @@ class FileMethodMap(MethodMap):
         items_read = len(data) // item_size
         data = data[:items_read * item_size]
 
-        self.amx._writeheap(items_addr, ctypes.create_string_buffer(data))
+        items[:len(data)] = data
         return items_read
 
     @native
