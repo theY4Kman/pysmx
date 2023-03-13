@@ -3,7 +3,15 @@ import sys
 import types
 from enum import Enum
 
-__all__ = ['NoneType', 'Literal', 'StrEnum', 'iskeyword', 'hexlify', 'get_annotations']
+__all__ = [
+    'NoneType',
+    'Literal',
+    'ParamSpec',
+    'StrEnum',
+    'iskeyword',
+    'hexlify',
+    'get_annotations',
+]
 
 
 if sys.version_info >= (3, 10):
@@ -16,6 +24,12 @@ if sys.version_info >= (3, 8):
     from typing import Literal
 else:
     from typing_extensions import Literal
+
+
+if sys.version_info >= (3, 10):
+    from typing import ParamSpec
+else:
+    from typing_extensions import ParamSpec
 
 
 if sys.version_info >= (3, 11):

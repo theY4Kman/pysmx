@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import sys
-import typing
 from copy import deepcopy
 from ctypes import addressof, sizeof
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, TYPE_CHECKING
+from typing import Any, cast as typing_cast, Dict, Generic, List, Tuple, TYPE_CHECKING, TypeVar
 
+from smx.compat import ParamSpec
 from smx.definitions import cell, RTTIControlByte, SP_MAX_EXEC_PARAMS
 from smx.interfaces import (
     CallableReturnValue,
@@ -192,7 +192,11 @@ class SourcePawnPluginRuntime:
         self.amx.HEA = bounds_addr
 
 
-class PluginFunction(ICallable):
+RV = TypeVar('RV')
+P = ParamSpec('P')
+
+
+class PluginFunction(Generic[P, RV], ICallable[P, RV]):
     def __init__(self, runtime: SourcePawnPluginRuntime, func_id: int, code_offs: int):
         self.runtime: SourcePawnPluginRuntime = runtime
         self.func_id = func_id
@@ -204,11 +208,11 @@ class PluginFunction(ICallable):
         #: Holds arguments for the current invocation
         self._params: List[ParamInfo] = []
 
-    def __call__(self, *args):
+    def __call__(self, *args: P) -> RV:
         call_rval, did_succeed = self.call(*args)
         return call_rval.rval
 
-    def call(self, *args):
+    def call(self, *args: P) -> Tuple[CallableReturnValue[RV] | None, bool]:
         if not self.rtti_method and args:
             raise TypeError(
                 'Method has no type information. '
@@ -282,10 +286,10 @@ class PluginFunction(ICallable):
         return param
 
     def push_float(self, value: float):
-        return self.push_cell(typing.cast(int, value))
+        return self.push_cell(typing_cast(int, value))
 
     def push_float_by_ref(self, value: float, flags: ParamCopyFlag = 0):
-        return self.push_cell_by_ref(typing.cast(int, value), flags)
+        return self.push_cell_by_ref(typing_cast(int, value), flags)
 
     def push_array(self, value: List[int | float] | None, flags: ParamCopyFlag = 0):
         param = self._add_param()
@@ -311,7 +315,7 @@ class PluginFunction(ICallable):
         param.string_flags = string_flags
         return param
 
-    def execute(self) -> Tuple[CallableReturnValue | None, int]:
+    def execute(self) -> Tuple[CallableReturnValue[RV] | None, int]:
         # TODO(zk): clear pending exceptions
 
         rval, err = self.invoke()
@@ -322,7 +326,7 @@ class PluginFunction(ICallable):
         # TODO(zk): constant for "no exception"
         return rval, 0
 
-    def invoke(self) -> Tuple[CallableReturnValue | None, bool]:
+    def invoke(self) -> Tuple[CallableReturnValue[RV] | None, bool]:
         # TODO(zk): check runnable
         # TODO(zk): check error state
 

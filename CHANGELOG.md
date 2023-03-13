@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Added
  - Add `GetMyHandle`, `GetPluginFilename`, and `GetPluginInfo` natives
  - Add `Pointer` and `Array` native param type annotations
+ - Add natives/methodmap/enum stub generation utility (install with `stubgen` extra; py3.11+ only; run with `pysmx_stubgen <output-directory>`)
 
 ### Changed
  - Switch `@native` decorator to interpret param types from typing annotations

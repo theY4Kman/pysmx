@@ -1,0 +1,77 @@
+%import common.C_COMMENT
+%import common.CPP_COMMENT
+%import common.WS
+
+%ignore WS
+%ignore C_COMMENT
+%ignore CPP_COMMENT
+
+!symbol: /([@_a-zA-Z][@_a-zA-Z0-9]+|[a-zA-Z][@_a-zA-Z0-9]*)/
+!identifier: /([@_a-zA-Z][@_a-zA-Z0-9]+|[a-zA-Z][@_a-zA-Z0-9]*)/
+string_literal: /"(\.|[^"])*"/
+integer_literal: /[-+]?\d[_\d]*/
+float_literal: /[-+]?\d[_\d]*\.\d[_\d]*(e[-+]?\d+)?/
+!builtin_type: "_" | "void" | "int" | "float" | "char" | "bool" | "function"
+
+!const: "const"
+!and_: "&"
+!ellipsis: "..."
+
+?expr: inclusive_or_expr
+     | shift_expr
+     | identifier
+     | paren_expr
+     | literal
+
+?literal: integer_literal
+         | float_literal
+         | string_literal
+         | array_literal
+
+array_literal: "{" expr ("," expr)* "}"
+
+inclusive_or_expr: expr "|" expr
+?shift_expr: expr "<<" expr -> shift_left
+           | expr ">>" expr -> shift_right
+?paren_expr: "(" expr ")"
+
+///////////////////////////////////////////////////////////////////////////////
+
+enum_items: enum_item ("," enum_item)* ","?
+enum_item: identifier ("=" expr)?
+
+///////////////////////////////////////////////////////////////////////////////
+
+param_list: param_decl ("," param_decl)*
+?param_decl: param_decl_old | param_decl_new
+
+?param_decl_old: const? and_? tags? identifier old_dims? ("=" expr)?
+?param_decl_new: const? type_expression and_? ((identifier old_dims? ("=" expr)?) | ellipsis)
+
+tags: tag_vector | tag
+tag_vector: "[" symbol ("," symbol)* "]"
+tag: (symbol | builtin_type) ":"
+
+type_expression: type type_dims
+type: (builtin_type | symbol)
+
+type_dims: no_sz_dim*
+?no_sz_dim: ("[" "]")
+old_dims: ("[" expr? "]")*
+
+///////////////////////////////////////////////////////////////////////////////
+
+methodmap: "methodmap" identifier "<" identifier "{" methodmap_body "}" ";"?
+methodmap_body: (methodmap_item ";")*
+
+?methodmap_item: methodmap_method | methodmap_property
+methodmap_method: methodmap_method_class? "static"? "native" type_expression identifier "(" param_list? ")" ";"
+?methodmap_method_class: "public" | "private"
+
+methodmap_property: "property" type_expression identifier "{" methodmap_method "}"
+
+///////////////////////////////////////////////////////////////////////////////
+
+typeset: "typeset" identifier "{" function_decl+ "}" ";"?
+typedef: "typedef" identifier "=" type_expression identifier ";"
+function_decl: "function" type_expression "(" param_list? ")" ";"

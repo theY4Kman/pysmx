@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import dataclasses
 from enum import IntFlag
-from typing import Any, List, NamedTuple, Tuple, Union
+from typing import Generic, List, NamedTuple, Tuple, TypeVar, Union
+
+from smx.compat import ParamSpec
 
 
 class ParamCopyFlag(IntFlag):
@@ -53,12 +55,16 @@ class ParamInfo:
     phys_addr: int = -1
 
 
-class CallableReturnValue(NamedTuple):
-    rval: Any
+RV = TypeVar('RV')
+P = ParamSpec('P')
+
+
+class CallableReturnValue(NamedTuple, Generic[RV]):
+    rval: RV
     args: List[ParamValueT]
 
 
-class ICallable:
+class ICallable(Generic[P, RV]):
     def push_cell(self, value: int):
         raise NotImplementedError
 
@@ -81,10 +87,11 @@ class ICallable:
     def push_string_ex(self, value: str, length: int, string_flags: ParamStringFlag = 0, copy_flags: ParamCopyFlag = 0):
         raise NotImplementedError
 
-    # TODO(zk): return result
-    def execute(self) -> Tuple[CallableReturnValue | None, int]:
+    def execute(self) -> Tuple[CallableReturnValue[RV] | None, int]:
         raise NotImplementedError
 
-    # TODO(zk): return result
-    def invoke(self) -> Tuple[CallableReturnValue | None, bool]:
+    def invoke(self) -> Tuple[CallableReturnValue[RV] | None, bool]:
+        raise NotImplementedError
+
+    def __call__(self, *args: P) -> RV:
         raise NotImplementedError
