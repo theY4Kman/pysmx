@@ -7,8 +7,15 @@ from pathlib import Path
 from typing import Callable, Protocol
 
 import inflection
+from isort.wrap_modes import WrapModes
 
 from smx.compat import iskeyword
+
+try:
+    import isort
+    HAS_ISORT = True
+except ImportError:
+    HAS_ISORT = False
 
 _import_ctx: ContextVar[ImportContext] = ContextVar('import_ctx')
 
@@ -83,6 +90,7 @@ class ImportedName(str):
 
 
 mod_enum = _import('enum')
+mod_exc = _import('smx.exceptions')
 mod_runtime = _import('smx.runtime')
 mod_handles = _import('smx.sourcemod.handles')
 mod_natives_base = _import("smx.sourcemod.natives.base")
@@ -275,7 +283,8 @@ class Native(PyStubBase):
         return_type = py_format_type(self.return_type, **kwargs)
         return (
             f'{indent}@{mod_natives_base.native}\n'
-            f'{indent}def {self.name}({", ".join(params)}) -> {return_type}: ...'
+            f'{indent}def {self.name}({", ".join(params)}) -> {return_type}:\n'
+            f'{indent}    raise {mod_exc.SourcePawnUnboundNativeError}'
         )
 
 
@@ -439,10 +448,18 @@ class IncludeFile:
                     sections.append(enum.py_format())
 
             if self.methodmaps:
+                handle_class_decls = []
+                methodmap_classes = []
+                methodmap_class_vars = []
+
                 for methodmap in self.methodmaps:
-                    sections.append(methodmap.py_format_handle_class(**resolve_kwargs))
-                    sections.append(methodmap.py_format(**resolve_kwargs))
-                    cls_lines.append(methodmap.py_format_decl(indent=4))
+                    handle_class_decls.append(methodmap.py_format_handle_class(**resolve_kwargs))
+                    methodmap_classes.append(methodmap.py_format(**resolve_kwargs))
+                    methodmap_class_vars.append(methodmap.py_format_decl(indent=4))
+
+                sections.extend(handle_class_decls)
+                sections.extend(methodmap_classes)
+                cls_lines.append('\n'.join(methodmap_class_vars))
 
             if self.natives:
                 for native in self.natives:
@@ -457,10 +474,17 @@ class IncludeFile:
                 )
 
             imports = [
-                'from __future__ import annotations\n',
+                'from __future__ import annotations',
                 *import_ctx.get_imports(),
             ]
-            sections.insert(0, '\n'.join(imports))
+            import_section = '\n'.join(imports)
+            if HAS_ISORT:
+                import_section = isort.code(
+                    import_section,
+                    multi_line_output=WrapModes.VERTICAL_HANGING_INDENT,
+                )
+
+            sections.insert(0, import_section.strip())
 
         return '\n\n\n'.join(sections) + '\n'
 

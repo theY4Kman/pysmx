@@ -29,7 +29,7 @@ from typing import Any, List, NamedTuple, Tuple, Type, TYPE_CHECKING, TypeVar
 from smx.compat import hexlify
 from smx.definitions import cell, PyCSimpleType, SPCodeFeature, ucell
 from smx.errors import SourcePawnErrorCode
-from smx.exceptions import SourcePawnPluginError, SourcePawnRuntimeError
+from smx.exceptions import SourcePawnPluginError, SourcePawnRuntimeError, SourcePawnUnboundNativeError
 from smx.opcodes import opcodes, SourcePawnInstruction
 from smx.pawn import SMXInstructions
 from smx.sourcemod.system import SourceModSystem
@@ -638,14 +638,16 @@ class SourcePawnAbstractMachine:
         try:
             pyfunc = self.sm_natives.get_native(native.name)
             if pyfunc is None:
-                self.report_error(SourcePawnErrorCode.INVALID_NATIVE)
-                return
+                raise SourcePawnUnboundNativeError
 
             params = ctypes.cast(self.heap, POINTER(cell))
             params_ptr = ctypes.cast(pointer(params), POINTER(c_void_p))
             params_ptr.contents.value += paramoffs
 
             return pyfunc(params)
+        except SourcePawnUnboundNativeError:
+            self.report_error(SourcePawnErrorCode.INVALID_NATIVE)
+            return
         finally:
             self._pop_frame()
 

@@ -20,6 +20,10 @@ class SourcePawnPluginNativeError(SourcePawnPluginError):
     """Invalid native, or error invoking native"""
 
 
+class SourcePawnUnboundNativeError(SourcePawnPluginNativeError, NotImplementedError):
+    """Native not bound to an implementation"""
+
+
 class SourcePawnStringFormatError(SourcePawnPluginNativeError):
     """Error during string formatting natives (PrintToChat, etc)"""
 
