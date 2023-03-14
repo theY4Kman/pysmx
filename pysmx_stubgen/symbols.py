@@ -419,7 +419,7 @@ class IncludeFile:
 
     @property
     def py_mod(self) -> ImportedName:
-        return _import(f'smx.natives.{self.name}')
+        return _import(f'smx.sourcemod.natives.{self.name}')
 
     def py_format(
         self,
@@ -482,6 +482,7 @@ class IncludeFile:
                 import_section = isort.code(
                     import_section,
                     multi_line_output=WrapModes.VERTICAL_HANGING_INDENT,
+                    include_trailing_comma=True,
                 )
 
             sections.insert(0, import_section.strip())

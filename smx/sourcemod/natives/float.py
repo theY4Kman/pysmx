@@ -1,6 +1,8 @@
+import ctypes
 import math
 
-from smx.sourcemod.natives.base import native, SourceModNativesMixin
+from smx.definitions import cell
+from smx.sourcemod.natives.base import Array, native, SourceModNativesMixin
 
 
 class FloatNatives(SourceModNativesMixin):
@@ -92,4 +94,49 @@ class FloatNatives(SourceModNativesMixin):
     def ArcTangent2(self, y: float, x: float) -> float:
         return math.atan2(y, x)
 
-    # TODO(zk): random numbers
+    @native
+    def __FLOAT_GT__(self, a: float, b: float) -> bool:
+        return a > b
+
+    @native
+    def __FLOAT_GE__(self, a: float, b: float) -> bool:
+        return a >= b
+
+    @native
+    def __FLOAT_LT__(self, a: float, b: float) -> bool:
+        return a < b
+
+    @native
+    def __FLOAT_LE__(self, a: float, b: float) -> bool:
+        return a <= b
+
+    @native
+    def __FLOAT_EQ__(self, a: float, b: float) -> bool:
+        return a == b
+
+    @native
+    def __FLOAT_NE__(self, a: float, b: float) -> bool:
+        return a != b
+
+    @native
+    def __FLOAT_NOT__(self, a: float) -> bool:
+        return not a
+
+    @native
+    def GetURandomInt(self) -> int:
+        return self.runtime.rand.randint(0, 0x7FFFFFFF)
+
+    @native
+    def GetURandomFloat(self) -> float:
+        return self.runtime.rand.random()
+
+    @native
+    def SetURandomSeed(self, seeds: Array[int], num_seeds: int) -> None:
+        # XXX(zk): can this be done with better DX? casting an Array? built-in Array size?
+        seed_bytes = ctypes.cast(seeds.c_ptr, ctypes.POINTER(ctypes.c_byte))
+        seed_array = bytearray(seed_bytes[:num_seeds*ctypes.sizeof(cell)])
+        self.runtime.rand.seed(seed_array)
+
+    @native
+    def float(self, value: int) -> float:
+        return float(value)

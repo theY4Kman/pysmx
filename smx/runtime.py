@@ -5,6 +5,7 @@ from copy import deepcopy
 from ctypes import addressof, sizeof
 from datetime import datetime
 from pathlib import Path
+from random import Random
 from typing import Any, cast as typing_cast, Dict, Generic, List, Tuple, TYPE_CHECKING, TypeVar
 
 from smx.compat import ParamSpec
@@ -18,7 +19,6 @@ from smx.interfaces import (
     ParamValueT,
 )
 from smx.rtti import RTTI
-from smx.sourcemod.natives.base import convert_return_value, WritableString
 from smx.vm import SourcePawnAbstractMachine
 
 if TYPE_CHECKING:
@@ -71,6 +71,15 @@ class SourcePawnPluginRuntime:
         # Saves all the lines printed to the server console
         self.console: List[Tuple[datetime, str]] = []
         self.console_redirect = sys.stdout
+
+        # Per-plugin random number generator
+        self._rand: Random | None = None
+
+    @property
+    def rand(self) -> Random:
+        if self._rand is None:
+            self._rand = Random()
+        return self._rand
 
     def printf(self, msg) -> None:
         self.console.append((datetime.now(), msg))
@@ -329,6 +338,8 @@ class PluginFunction(Generic[P, RV], ICallable[P, RV]):
     def invoke(self) -> Tuple[CallableReturnValue[RV] | None, bool]:
         # TODO(zk): check runnable
         # TODO(zk): check error state
+
+        from smx.sourcemod.natives.base import convert_return_value, WritableString
 
         # Copy params, allowing reentrancy (calls within calls, yo)
         params = deepcopy(self._params)

@@ -8,8 +8,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ## [Unreleased]
 ### Added
  - Add `GetMyHandle`, `GetPluginFilename`, and `GetPluginInfo` natives
+ - Add random natives `SetURandomSeed`, `GetURandomInt`, and `GetURandomFloat`
  - Add `Pointer` and `Array` native param type annotations
  - Add natives/methodmap/enum stub generation utility (install with `stubgen` extra; py3.11+ only; run with `pysmx_stubgen <output-directory>`)
+ - Add stubs for all unimplemented natives
 
 ### Changed
  - Switch `@native` decorator to interpret param types from typing annotations

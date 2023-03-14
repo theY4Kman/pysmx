@@ -304,8 +304,10 @@ def get_c_type(py_type: Type[V]) -> PyCSimpleType:
         return ctypes.c_float
     elif issubclass(py_type, bool):
         return ctypes.c_bool
-    elif issubclass(py_type, (str, bytes)):
+    elif issubclass(py_type, str):
         return ctypes.c_char
+    elif issubclass(py_type, bytes):
+        return ctypes.c_ubyte
     else:
         raise TypeError(f'Unsupported type {py_type!r}')
 

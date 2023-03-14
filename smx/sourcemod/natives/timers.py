@@ -3,7 +3,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from smx.sourcemod.natives.base import native, SourceModNativesMixin
+from smx.exceptions import SourcePawnUnboundNativeError
+from smx.sourcemod.handles import SourceModHandle
+from smx.sourcemod.natives.base import native, Pointer, SourceModNativesMixin
 
 if TYPE_CHECKING:
     from smx.runtime import PluginFunction
@@ -28,3 +30,35 @@ class TimerNatives(SourceModNativesMixin):
         """
         logger.info('Interval: %f, func: %d, data: %d, flags: %d' % (interval, func, data, flags))
         return self.sys.timers.create_timer(interval, func, data, flags)
+
+    @native
+    def KillTimer(self, timer: SourceModHandle, auto_close: bool) -> None:
+        raise SourcePawnUnboundNativeError
+
+    @native
+    def TriggerTimer(self, timer: SourceModHandle, reset: bool) -> None:
+        raise SourcePawnUnboundNativeError
+
+    @native
+    def GetTickedTime(self) -> float:
+        raise SourcePawnUnboundNativeError
+
+    @native
+    def GetMapTimeLeft(self, timeleft: Pointer[int]) -> bool:
+        raise SourcePawnUnboundNativeError
+
+    @native
+    def GetMapTimeLimit(self, time: Pointer[int]) -> bool:
+        raise SourcePawnUnboundNativeError
+
+    @native
+    def ExtendMapTimeLimit(self, time: int) -> bool:
+        raise SourcePawnUnboundNativeError
+
+    @native
+    def GetTickInterval(self) -> float:
+        raise SourcePawnUnboundNativeError
+
+    @native
+    def IsServerProcessing(self) -> bool:
+        raise SourcePawnUnboundNativeError

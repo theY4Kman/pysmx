@@ -109,7 +109,7 @@ class ParamTransformer(BaseTransformer):
         else:
             name = str(children[i])
             i += 1
-            if isinstance(children[i], list):
+            if children[i] and isinstance(children[i], list):
                 dims = children[i]
                 i += 1
 
@@ -125,6 +125,10 @@ class ParamTransformer(BaseTransformer):
 
     def type_dims(self, children):
         return [None] * len(children)
+
+    def old_dims(self, children):
+        if children:
+            return [child or None for child in children]
 
 
 class EnumTransformer(BaseTransformer):

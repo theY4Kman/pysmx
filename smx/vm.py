@@ -27,12 +27,11 @@ from enum import Enum
 from typing import Any, List, NamedTuple, Tuple, Type, TYPE_CHECKING, TypeVar
 
 from smx.compat import hexlify
-from smx.definitions import cell, PyCSimpleType, SPCodeFeature, ucell
+from smx.definitions import cell, PyCSimpleType
 from smx.errors import SourcePawnErrorCode
 from smx.exceptions import SourcePawnPluginError, SourcePawnRuntimeError, SourcePawnUnboundNativeError
 from smx.opcodes import opcodes, SourcePawnInstruction
 from smx.pawn import SMXInstructions
-from smx.sourcemod.system import SourceModSystem
 
 if TYPE_CHECKING:
     from typing import NoReturn
@@ -217,6 +216,8 @@ class SourcePawnAbstractMachine:
         self.exception = None
 
     def init(self):
+        from smx.sourcemod.system import SourceModSystem
+
         self.COD = self.plugin.pcode.pcode
         self.DAT = self.plugin.data
 

@@ -28,6 +28,9 @@ class SourceModHandles:
     def __getitem__(self, handle_id: int):
         return self._handles[handle_id].obj
 
+    def __contains__(self, item):
+        return item in self._handles
+
     def get_raw(self, handle_id: int) -> SourceModHandle | None:
         return self._handles.get(handle_id)
 

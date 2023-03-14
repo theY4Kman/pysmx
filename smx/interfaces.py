@@ -59,9 +59,18 @@ RV = TypeVar('RV')
 P = ParamSpec('P')
 
 
-class CallableReturnValue(NamedTuple, Generic[RV]):
+@dataclasses.dataclass
+class CallableReturnValue(Generic[RV]):
     rval: RV
     args: List[ParamValueT]
+
+    def __getitem__(self, item):
+        if item == 0:
+            return self.rval
+        elif item == 1:
+            return self.args
+        else:
+            raise IndexError(item)
 
 
 class ICallable(Generic[P, RV]):
